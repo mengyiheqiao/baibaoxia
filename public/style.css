@@ -877,3 +877,25 @@ body.private-space .main-only { display: none !important; }
 .ap-item .s { color: var(--muted); font-size: 12px; }
 .ap-arch { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 2px; border-bottom: 1px dashed var(--line); }
 .ap-arch small { color: var(--muted); }
+
+/* ---------- 0.12 AI 管家 ---------- */
+.butler-head { display: flex; gap: 12px; align-items: center; margin-bottom: 4px; }
+.butler-head .sub { margin: 0; }
+.butler-face { flex: none; width: 58px; height: 58px; border-radius: 50%; background: var(--page); border: 1px solid var(--line); display: grid; place-items: center; position: relative; transition: transform .25s; }
+.butler-face .bf-emoji { font-size: 28px; line-height: 1; animation: bf-breathe 3.2s ease-in-out infinite; }
+.butler-face .bf-mood { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); font-size: 10.5px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+.butler-face[data-mood="思考"] .bf-emoji { animation: bf-think 1.4s ease-in-out infinite; }
+.butler-face[data-mood="找到了"] .bf-emoji, .butler-face[data-mood="开心"] .bf-emoji { animation: bf-hop .6s ease-out 1, bf-breathe 3.2s ease-in-out .6s infinite; }
+.butler-face[data-mood="惊讶"] .bf-emoji { animation: bf-shake .4s ease-out 1; }
+.butler-face[data-mood="困"] .bf-emoji { animation: bf-sway 3s ease-in-out infinite; }
+@keyframes bf-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+@keyframes bf-think { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+@keyframes bf-hop { 0% { transform: translateY(0); } 40% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+@keyframes bf-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+@keyframes bf-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg) translateY(2px); } }
+@media (prefers-reduced-motion: reduce) { .butler-face .bf-emoji { animation: none !important; } }
+.chat-step { font-size: 12.5px; color: var(--muted); padding-left: 10px; border-left: 2px solid var(--line); margin: 2px 0; }
+.chat-steps { margin-bottom: 6px; }
+.chat-steps summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.chat-done { font-size: 12.5px; color: var(--lamp-on); margin-top: 6px; }
+#bt-persona { min-height: 140px; font-size: 13px; line-height: 1.6; }

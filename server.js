@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.11.0';
+const VERSION = '0.12.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -645,7 +645,7 @@ function preparePrivate(d, fresh) {
         '- 忘了密码：用记事本打开百宝匣文件夹里的 settings.json，删掉"私密密码"那一段，保存后重启百宝匣，再按 Ctrl+Alt+H 重新设',
         '- 文件放在百宝匣文件夹里的"私密区"文件夹（Windows 上是隐藏的），备份时也会一起备份',
         '- 密码防的是别人在页面上看到，文件本身是普通文件',
-        '- 这里的东西不会发给 AI，也不记使用统计',
+        '- 这里的东西默认不会发给 AI，也不记使用统计；想让"问问"里的管家帮你翻这里的资料，在设置 → 这边的管家里打开',
         '',
       ].join('\n'), 'utf8');
     }
@@ -1702,52 +1702,78 @@ function retrieve(question, d, limit = 6) {
   return chunks.filter(c => c.score > 1).sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
-async function aiAsk(body, req) {
+// ---- AI 管家（会自己翻资料、能听吩咐做事）
+const butlerLib = require('./lib/butler.js');
+function ensurePage(d, name) {
+  const b = readBinder(d);
+  let pg = b.pages.find(x => x.name === name);
+  let created = false;
+  if (!pg) {
+    const used = new Set(b.pages.map(x => x.color));
+    let color = [...Array(PAGE_COLORS).keys()].find(c => !used.has(c));
+    if (color === undefined) color = b.pages.length % PAGE_COLORS;
+    pg = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: String(name).slice(0, 20), color, created: Date.now() };
+    b.pages.unshift(pg);
+    writeBinder(d, b);
+    created = true;
+  }
+  return { page: pg, created };
+}
+const butler = butlerLib.createButler({
+  aiChat, listNotes, listFiles, readIndex, retrieve, binderView, statsReport, readTools,
+  createNote(d, title, text, pageName) {
+    const t = cleanName(title) || '新的说明';
+    const name = uniqueName(d.root, t + '.md');
+    const id = name.replace(/\.md$/i, '');
+    let body = String(text);
+    body = /^# .*$/m.test(body) ? body.replace(/^# .*$/m, `# ${id}`) : `# ${id}\n\n${body}`;
+    fs.writeFileSync(path.join(d.root, name), body, 'utf8');
+    let page = '';
+    if (pageName) { const r = ensurePage(d, pageName); binderPut(d, 'note', id, r.page.id); page = r.page.name; }
+    if (d.root === MEMORY_DIR) recordAction('新建');
+    return { ok: true, id, page };
+  },
+  putInPage(d, pageName, items) {
+    const r = ensurePage(d, pageName);
+    for (const it of items) binderPut(d, it.kind, it.id, r.page.id);
+    return { ok: true, created: r.created };
+  },
+});
+// 管家的人格：白天（普通区）存在设置里；夜里（私密区）存在私密区文件夹里，普通区看不到
+function butlerFile() { return path.join(PRIVATE_DIR, '.管家.json'); }
+function readButler(space) {
+  if (space === 'private') {
+    let j = {};
+    try { j = JSON.parse(fs.readFileSync(butlerFile(), 'utf8')); } catch {}
+    return { persona: { ...butlerLib.DEFAULT_PERSONA.private, ...(j['人格'] || {}) }, allowPrivate: !!j['可以看私密区'] };
+  }
+  const s = readSettings()['管家'] || {};
+  return { persona: { ...butlerLib.DEFAULT_PERSONA.main, ...s } };
+}
+function writeButler(space, patch) {
+  const clean = v => ({ 名字: String(v.名字 || '').trim().slice(0, 20), 设定: String(v.设定 || '').slice(0, 6000) });
+  if (space === 'private') {
+    let j = {};
+    try { j = JSON.parse(fs.readFileSync(butlerFile(), 'utf8')); } catch {}
+    if (patch.persona) j['人格'] = clean(patch.persona);
+    if (patch.allowPrivate !== undefined) j['可以看私密区'] = !!patch.allowPrivate;
+    fs.mkdirSync(PRIVATE_DIR, { recursive: true });
+    fs.writeFileSync(butlerFile(), JSON.stringify(j, null, 2), 'utf8');
+  } else if (patch.persona) {
+    writeSettings({ '管家': clean(patch.persona) });
+  }
+}
+async function butlerAsk(body, space, onStep) {
   const question = String(body.question || '').trim();
   if (!question) return { ok: false, message: '问点什么吧。' };
-  const d = spaceDirs('main');
-  const hits = retrieve(question, d);
-  const tools = readTools().tools.filter(t => !t.private);
-  const notes = listNotes(d).map(n => n.title);
-  const sources = hits.map((h, i) => ({ n: i + 1, kind: h.kind, id: h.id, name: h.name, title: h.title, label: h.label, page: h.page, chapter: h.chapter }));
-  const ctx = hits.map((h, i) => `[${i + 1}] 来自${h.kind === 'note' ? '说明' : '资料'}《${h.title}》${h.label ? ' ' + h.label : ''}：\n${h.text}`).join('\n\n');
+  const b = readButler(space);
   const free = body.free !== undefined ? !!body.free : !!readSettings()['AI自由回答'];
-  const rule = free
-    ? `你是一个知识渊博、乐于助人的助手，住在用户的"百宝匣"里。用中文回答。
-按问题需要决定长短：简单的问题简短回答，需要讲解、分析、写东西的就完整、详细地回答，不用刻意压缩。
-可以自由运用你自己的知识。下面"用户自己的资料"只是参考：问题和资料相关时，用上它并在句子后面标 [1] [2] 这样的编号；不相关就不用管它，也不用提"资料里没有"。
-`
-    : `你是"百宝匣"里的助手。百宝匣是用户自己的工具箱和资料库。回答要简短、直接、用中文。
-回答时优先依据下面"用户自己的资料"，引用时在句子后面标 [1] [2] 这样的编号；资料里没有的，可以用常识回答，但要说明"你的资料里没有记这个"。
-`;
-  const sys = `${rule}你还可以帮用户做事，用 actions 表示：
-- {"type":"launch","tool":"工具名"}：打开柜子里的某个工具（只在用户想打开、想用它时）
-- {"type":"open_note","note":"说明标题"}：打开某篇说明
-- {"type":"create_note","title":"标题","text":"完整的 Markdown，第一行 # 标题，第二行 标签: ..."}：新建一篇说明（只在用户要求记下来、整理成说明时）
-只用下面列出的工具名和说明标题，不要编。
-必须只输出一个 JSON 对象：{"answer":"给用户看的回答（可以用 Markdown）","actions":[...]}
-
-柜子里的工具：${tools.map(t => `${t.name}（${t.typeLabel}${t.desc ? '，' + t.desc : ''}）`).join('；') || '无'}
-已有的说明：${notes.join('、') || '无'}
-
-用户自己的资料：
-${ctx || '（没有找到相关的）'}`;
-  const history = Array.isArray(body.history) ? body.history.slice(-6).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '').slice(0, 2000) })) : [];
   try {
-    const r = await aiChat([{ role: 'system', content: sys }, ...history, { role: 'user', content: question }], { json: true, maxTokens: free ? 4000 : 2000 });
-    let out = null;
-    const m = /\{[\s\S]*\}/.exec(r.text);
-    try { out = JSON.parse(m ? m[0] : r.text); } catch {}
-    if (!out || typeof out.answer !== 'string') out = { answer: r.text, actions: [] };
-    const actions = (Array.isArray(out.actions) ? out.actions : []).filter(a => a && ['launch', 'open_note', 'create_note'].includes(a.type)).slice(0, 3);
-    for (const a of actions) {
-      if (a.type === 'launch') { const t = tools.find(x => x.name === a.tool); a.ok = !!t; a.id = t && t.id; }
-      if (a.type === 'open_note') { a.ok = notes.includes(a.note); }
-      if (a.type === 'create_note') { a.ok = !!(a.title && a.text); }
-    }
-    // 只列出回答里真正引用到的出处
-    const cited = new Set([...out.answer.matchAll(/\[(\d+)\]/g)].map(m => Number(m[1])));
-    return { ok: true, answer: out.answer, actions: actions.filter(a => a.ok), sources: sources.filter(x => cited.has(x.n)), free };
+    return await butler.run({
+      question, history: body.history, free, space, d: spaceDirs(space),
+      persona: { 名字: b.persona.名字 || '百宝匣', 设定: b.persona.设定 || '' },
+      privateBlind: space === 'private' && !b.allowPrivate, onStep,
+    });
   } catch (e) {
     return { ok: false, message: e.message.startsWith('还没设置') ? e.message : 'AI 出错：' + net.netError(e) };
   }
@@ -2567,8 +2593,23 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await aiSummarize(spaceDirs(space), await readJson(req)));
     }
     if (p === '/api/ai/ask' && req.method === 'POST') {
-      if (space === 'private') return send(res, 200, { ok: false, message: '私密区里不能用 AI 管家。' });
-      return send(res, 200, await aiAsk(await readJson(req), req));
+      const body = await readJson(req);
+      // 页面要求"边查边说"时，一行一个 JSON 地发回去：先是查找进度，最后是回答
+      if (/ndjson/.test(req.headers.accept || '')) {
+        res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        const r = await butlerAsk(body, space, st => { try { res.write(JSON.stringify({ step: st }) + '\n'); } catch {} });
+        return res.end(JSON.stringify({ done: r }) + '\n');
+      }
+      return send(res, 200, await butlerAsk(body, space));
+    }
+    if (p === '/api/butler' && req.method === 'GET') {
+      const b = readButler(space);
+      return send(res, 200, { ok: true, persona: b.persona, ...(space === 'private' ? { allowPrivate: b.allowPrivate } : {}), moods: butlerLib.MOODS });
+    }
+    if (p === '/api/butler' && req.method === 'POST') {
+      const body = await readJson(req);
+      writeButler(space, { persona: body.persona, allowPrivate: space === 'private' ? body.allowPrivate : undefined });
+      return send(res, 200, { ok: true, ...readButler(space) });
     }
     if (p === '/api/clip' && req.method === 'POST') {
       const body = await readJson(req);

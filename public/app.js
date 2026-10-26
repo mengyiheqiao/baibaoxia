@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.11.0';
+  const APP_VERSION = '0.12.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -648,7 +648,7 @@
     if (!b) return;
     if (/^quit/.test(b.dataset.act)) return quitFlow(b.dataset.act);
     if (/^desk-/.test(b.dataset.act)) return deskAct(b.dataset.act, b);
-    if (/^(pw|backup|cfg|pv|skin)-/.test(b.dataset.act)) return settingsAct(b.dataset.act, b);
+    if (/^(pw|backup|cfg|pv|skin|bt)-/.test(b.dataset.act)) return settingsAct(b.dataset.act, b);
     if (/^ocr-/.test(b.dataset.act)) return ocrAct(b.dataset.act);
     if (/^trash-/.test(b.dataset.act)) return trashAct(b.dataset.act, b);
     if (b.dataset.act === 'enter-private') { closePanel(); return togglePrivate(); }
@@ -843,7 +843,7 @@
     $('#scrim').hidden = false;
     const box = $('#panel .panel-inner');
     box.innerHTML = '<h2 id="panel-title">设置<button class="close" type="button" data-act="close" aria-label="关闭">×</button></h2><p class="sub">读取中…</p>';
-    const [a, st, skinHtml] = await Promise.all([api('/api/autostart'), api('/api/settings'), skinSectionHtml()]);
+    const [a, st, skinHtml, bt] = await Promise.all([api('/api/autostart'), api('/api/settings'), skinSectionHtml(), api('/api/butler')]);
     const last = st.lastBackup ? fmtDate(st.lastBackup) : '还没备份过';
     box.innerHTML = `
       <h2 id="panel-title">设置<button class="close" type="button" data-act="close" aria-label="关闭">×</button></h2>
@@ -907,6 +907,8 @@
         <p class="sub" id="ai-test-result"></p>
       </section>
 
+      ${bt && bt.ok ? butlerSectionHtml(bt) : ''}
+
       ${DESK && state.space !== 'private' ? deskSectionHtml() : ''}
 
       <section class="setting">
@@ -941,7 +943,28 @@
         <div class="btn-row"><button class="btn primary" data-act="pv-move">搬进来</button></div>` : '<p class="empty-note">普通区没有工具。</p>'}`);
   }
 
+  function butlerSectionHtml(bt) {
+    const priv = state.space === 'private';
+    const p = bt.persona || {};
+    return `<section class="setting" id="butler-setting">
+      <strong>${priv ? '这边的管家' : '管家'}</strong>
+      <p class="sub">"问问"里回答你的那位。起个名字，写下她的性格、说话方式、口头禅，AI 会照着演；她能做的事（翻资料、打开工具、新建说明）不用写。${priv ? '这里的设定只在私密区里用。' : ''}</p>
+      <label class="field"><span>名字</span><input id="bt-name" value="${esc(p.名字 || '')}" maxlength="20" placeholder="百宝匣"></label>
+      <label class="field"><span>人格设定</span><textarea id="bt-persona" rows="8" placeholder="比如：说话温柔，喜欢用游戏打比方……">${esc(p.设定 || '')}</textarea></label>
+      ${priv ? `<label class="check"><input type="checkbox" id="bt-allow" ${bt.allowPrivate ? 'checked' : ''}> <span>允许管家看私密区的资料<br><small>打开后，在这里问问时，用到的私密区说明和资料会发给你设置的 AI 服务。不打开的话，她只能陪你聊天，看不到这里的任何东西。</small></span></label>` : ''}
+      <div class="btn-row"><button class="btn primary" data-act="bt-save">保存</button></div>
+    </section>`;
+  }
+
   async function settingsAct(act, btn) {
+    if (act === 'bt-save') {
+      const json = { persona: { 名字: $('#bt-name').value.trim(), 设定: $('#bt-persona').value } };
+      if ($('#bt-allow')) json.allowPrivate = $('#bt-allow').checked;
+      const r = await api('/api/butler', { method: 'POST', json });
+      if (!r.ok) return toast(r.message || '没存上');
+      state.butler = null;
+      return toast(`存好了，${r.persona.名字 || '管家'}下次回答就会用新的设定`);
+    }
     if (act === 'skin-use') {
       const id = btn.dataset.id;
       const r = await api('/api/skins/use', { method: 'POST', json: { id } });
@@ -2984,6 +3007,9 @@
 
   function resetSpaceState() {
     closePanel();
+    state.chat = [];
+    state.butler = null;
+    state.mood = '待机';
     if ($('#q').value) $('#q').value = '';
     state.note = null;
     state.editing = false;
@@ -3209,20 +3235,38 @@
   }
 
   // ---- AI 管家
+  const MOOD_FACE = { 待机: '😌', 思考: '🤔', 说话: '💬', 找到了: '✨', 开心: '😊', 惊讶: '😮', 困: '😪', 玩游戏: '🎮' };
+  async function loadButler() {
+    if (!state.butler) {
+      const r = await api('/api/butler');
+      state.butler = r.ok ? r : { persona: { 名字: '百宝匣' } };
+    }
+    return state.butler;
+  }
+  function butlerName() { return (state.butler && state.butler.persona && state.butler.persona.名字) || '百宝匣'; }
+  function setMood(mood) {
+    state.mood = mood || '待机';
+    const f = $('#butler-face');
+    if (f) { f.dataset.mood = state.mood; f.querySelector('.bf-emoji').textContent = MOOD_FACE[state.mood] || '😌'; f.querySelector('.bf-mood').textContent = state.mood; }
+  }
+
   async function openChat() {
-    if (state.space === 'private') return toast('私密区里不能用 AI 管家');
     if (state.aiFree === undefined) {
       const st = await api('/api/settings');
       state.aiFree = !!(st.ai && st.ai.free);
     }
-    showPanel(`${panelHead('问问百宝匣')}
-      <p class="sub" id="chat-mode-tip">${chatModeTip()}</p>
+    await loadButler();
+    showPanel(`${panelHead('问问' + butlerName())}
+      <div class="butler-head">
+        <div class="butler-face" id="butler-face" data-mood="${esc(state.mood || '待机')}"><span class="bf-emoji">${MOOD_FACE[state.mood || '待机']}</span><span class="bf-mood">${esc(state.mood || '待机')}</span></div>
+        <p class="sub" id="chat-mode-tip">${chatModeTip()}</p>
+      </div>
       <label class="check chat-mode"><input type="checkbox" id="chat-free" ${state.aiFree ? 'checked' : ''}>
-        <span><strong>自由回答</strong> <small>打开后 AI 会像平常聊天一样，用它自己的知识详细回答；你的资料只当参考</small></span></label>
+        <span><strong>自由回答</strong> <small>打开后会像平常聊天一样，用 AI 自己的知识详细回答；你的资料只当参考</small></span></label>
       <div class="chat" id="chat-log"></div>
       <form class="chat-form" id="chat-form">
-        <textarea id="chat-input" rows="2" placeholder="比如：上次那个本地项目怎么开？"></textarea>
-        <button class="btn primary" type="submit">问</button>
+        <textarea id="chat-input" rows="2" placeholder="吩咐${esc(butlerName())}做点什么，比如：帮我看看昨天存的资料讲了什么"></textarea>
+        <button class="btn primary" type="submit">发送</button>
       </form>
       ${state.chat.length ? '<button class="link-btn" data-act="chat-clear">清空对话</button>' : ''}`);
     renderChat();
@@ -3230,35 +3274,45 @@
   }
 
   function chatModeTip() {
+    const n = esc(butlerName());
     return state.aiFree
-      ? '自由回答：什么都可以问，回答会更完整。问到你的资料时也会标出处，还能帮你打开工具、新建说明。'
-      : '资料优先：先在你自己的说明和资料里找答案，回答简短；还能帮你打开工具、新建说明。';
+      ? `自由回答：什么都可以问。问到你的资料时，${n}会自己去翻，还会标出处。`
+      : `${n}会自己翻你的说明和资料：按日期找、读完再总结、打开工具、新建说明、放进活页，都可以直接吩咐。`;
   }
 
   function renderChat() {
     const log = $('#chat-log');
     if (!log) return;
-    log.innerHTML = state.chat.length ? '' : `<div class="chat-tips">可以这样问：
-      <button data-ask="上次那个本地项目怎么开？">上次那个本地项目怎么开？</button>
-      <button data-ask="我记过哪些关于 Python 的东西？">我记过哪些关于 Python 的东西？</button>
-      <button data-ask="帮我把刚才说的整理成一篇说明">帮我把刚才说的整理成一篇说明</button></div>`;
+    const day = new Date(Date.now() - 86400000);
+    const ystd = `${day.getMonth() + 1}月${day.getDate()}日`;
+    log.innerHTML = state.chat.length ? '' : `<div class="chat-tips">可以这样吩咐：
+      <button data-ask="帮我看看${ystd}存的资料主要讲了什么">帮我看看${ystd}存的资料主要讲了什么</button>
+      <button data-ask="我最近剪藏了哪些文章？">我最近剪藏了哪些文章？</button>
+      <button data-ask="哪些说明好久没看了？">哪些说明好久没看了？</button>
+      <button data-ask="我记过哪些关于 Python 的东西？">我记过哪些关于 Python 的东西？</button></div>`;
     state.chat.forEach((m, mi) => {
       const div = document.createElement('div');
       div.className = 'msg ' + m.role;
       if (m.role === 'user') {
         div.textContent = m.content;
       } else if (m.pending) {
-        div.innerHTML = '<span class="dots">想一想</span>';
+        div.innerHTML = `${(m.steps || []).map(st => `<div class="chat-step">${esc(st.say || '翻资料中…')}</div>`).join('')}<span class="dots">${m.steps && m.steps.length ? '' : '想一想'}</span>`;
       } else if (m.error) {
         div.innerHTML = `<div class="err">${esc(m.error)}</div>${/还没设置/.test(m.error) ? '<button class="btn small primary" data-act="open-settings">去设置</button>' : ''}`;
       } else {
+        if (m.steps && m.steps.length) div.insertAdjacentHTML('beforeend', `<details class="chat-steps"><summary>翻了 ${m.steps.length} 次资料</summary>${m.steps.map(st => `<div class="chat-step">${esc(st.say || st.tool)}</div>`).join('')}</details>`);
         div.appendChild(renderMd(m.content));
         if (m.sources && m.sources.length) {
           div.insertAdjacentHTML('beforeend', `<div class="srcs">出处：${m.sources.map(s => `<button data-src="${mi}:${s.n}">[${s.n}] ${esc(s.title)}${s.label ? ' · ' + esc(s.label) : ''}</button>`).join('')}</div>`);
         }
         for (const [ai, a] of (m.actions || []).entries()) {
-          const label = a.type === 'launch' ? `${a.done ? '已打开' : '打开'}"${a.tool}"` : a.type === 'open_note' ? `打开说明"${a.note}"` : `${a.done ? '已新建' : '新建说明'}"${a.title}"`;
-          div.insertAdjacentHTML('beforeend', `<button class="btn small ${a.done ? '' : 'primary'} chat-act" data-chat-act="${mi}:${ai}">${esc(label)}</button>`);
+          let label, done = a.done;
+          if (a.type === 'launch') label = `${a.done ? '已打开' : '打开'}"${a.tool}"`;
+          else if (a.type === 'open') label = `打开${a.kind === 'note' ? '说明' : '资料'}"${a.title}"`;
+          else if (a.type === 'create_note') { done = a.ok; label = a.ok ? `已新建"${a.id}"${a.page ? `，放进了"${a.page}"` : ''} · 打开看看` : `没建成：${a.message || ''}`; }
+          else if (a.type === 'put_in_page') { label = `已把 ${a.count} 件放进"${a.page}"${a.created ? '（新建的活页）' : ''}`; div.insertAdjacentHTML('beforeend', `<div class="chat-done">✓ ${esc(label)}</div>`); continue; }
+          else continue;
+          div.insertAdjacentHTML('beforeend', `<button class="btn small ${done ? '' : 'primary'} chat-act" data-chat-act="${mi}:${ai}">${esc(label)}</button>`);
         }
       }
       log.appendChild(div);
@@ -3266,40 +3320,71 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  // 边查边说：后台一行一个 JSON，先是查找进度，最后是回答
+  async function askButler(json, onStep) {
+    let url = '/api/ai/ask' + (state.space === 'private' ? '?space=private' : '');
+    let res;
+    try {
+      res = await fetch(url, { method: 'POST', headers: { 'X-Baibao': '1', 'Content-Type': 'application/json', Accept: 'application/x-ndjson' }, body: JSON.stringify(json) });
+    } catch { return { ok: false, message: '连不上百宝匣后台。' }; }
+    if (!res.ok || !res.body || !/ndjson/.test(res.headers.get('content-type') || '')) {
+      let b; try { b = await res.json(); } catch { b = null; }
+      if (b && b.locked && state.space === 'private') { setTimeout(() => leavePrivate(true), 0); return { ok: false, message: '已自动锁上。' }; }
+      return b || { ok: false, message: OLD_BACKEND };
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', done = null;
+    for (;;) {
+      const { value, done: end } = await reader.read();
+      if (value) buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, k).trim();
+        buf = buf.slice(k + 1);
+        if (!line) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        if (o.step) onStep(o.step);
+        if (o.done) done = o.done;
+      }
+      if (end) break;
+    }
+    return done || { ok: false, message: '回答到一半断了，再问一次吧。' };
+  }
+
   async function sendChat(text) {
     const q = text.trim();
     if (!q) return;
     const history = state.chat.filter(m => !m.pending && !m.error).map(m => ({ role: m.role, content: m.content }));
     state.chat.push({ role: 'user', content: q });
-    const reply = { role: 'assistant', pending: true };
+    const reply = { role: 'assistant', pending: true, steps: [] };
     state.chat.push(reply);
+    const space = state.space;
+    setMood('思考');
     renderChat();
-    const r = await api('/api/ai/ask', { method: 'POST', json: { question: q, history, free: !!state.aiFree } });
+    const r = await askButler({ question: q, history, free: !!state.aiFree }, st => { reply.steps.push(st); setMood(st.mood || '思考'); renderChat(); });
+    if (state.space !== space) return; // 中途换了区，丢掉
     reply.pending = false;
-    if (!r.ok) { reply.error = r.message; renderChat(); return; }
+    if (!r.ok) { reply.error = r.message; setMood('惊讶'); renderChat(); return; }
     reply.content = r.answer;
     reply.sources = r.sources || [];
     reply.actions = r.actions || [];
+    reply.steps = r.steps || reply.steps;
+    setMood(r.mood);
     renderChat();
-    // 用户想打开的工具直接打开
+    // 吩咐打开的工具直接打开；新建、放进活页的已经做好了，刷新列表
     for (const a of reply.actions) {
       if (a.type === 'launch' && a.id) { a.done = true; launchTool(a.id); }
     }
+    if (reply.actions.some(a => a.type === 'create_note' || a.type === 'put_in_page')) loadNotes();
     renderChat();
   }
 
   async function chatAction(mi, ai) {
     const a = state.chat[mi].actions[ai];
     if (a.type === 'launch' && a.id) { a.done = true; launchTool(a.id); renderChat(); }
-    if (a.type === 'open_note') { closePanel(); openNote(a.note); }
-    if (a.type === 'create_note') {
-      if (a.done) { closePanel(); return openNote(a.createdId); }
-      const r = await api('/api/new-note', { method: 'POST', json: { title: a.title, text: a.text } });
-      if (!r.ok) return toast(r.message || '没建成');
-      a.done = true; a.createdId = r.id;
-      toast(`已新建说明"${r.id}"`);
-      renderChat();
-    }
+    if (a.type === 'open') { closePanel(); if (a.kind === 'note') openNote(a.id); else openFile(a.name); }
+    if (a.type === 'create_note' && a.ok) { closePanel(); openNote(a.id); }
   }
 
   function openSource(mi, n) {
