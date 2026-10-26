@@ -23,7 +23,7 @@ const head = `# 百宝匣使用手册
 
 ## 第一次使用
 
-1. 到 [Releases 页面](https://github.com/mengyiheqiao/baibaoxia/releases/latest) 下载 \`百宝匣-桌面版-x.x.x.zip\`
+1. 到 [Releases 页面](https://github.com/mengyiheqiao/baibaoxia/releases/latest) 下载 \`Baibaoxia-Desktop-x.x.x.zip\`
 2. 解压到一个常用的地方，比如 \`D:\\百宝匣\`（别放在 \`C:\\Program Files\` 里）
 3. 双击 \`百宝匣.exe\`。Windows 提示"已保护你的电脑"时，点"更多信息"→"仍要运行"
 4. 工具区已经放了几个示例抽屉，点一下试试；点最后一格"加一个工具"放进你自己的

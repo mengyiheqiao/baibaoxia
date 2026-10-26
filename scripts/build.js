@@ -67,7 +67,7 @@ function buildWeb() {
     ...EXTRA_FILES.flatMap(f => collect(f, top)),
     ...collect('启动百宝匣.bat', top),
   ]);
-  return save(`百宝匣-网页版-${VERSION}.zip`, makeZip(assertUnique(entries)));
+  return save(`Baibaoxia-Web-${VERSION}.zip`, makeZip(assertUnique(entries)));
 }
 
 // ---------------------------------------------------------------- 桌面版（Windows）
@@ -134,7 +134,7 @@ async function buildDesktop() {
   entries.push(...load(EXTRA_FILES.flatMap(f => collect(f, top))).map(e => e.name === top + 'LICENSE' ? { ...e, name: top + '百宝匣-LICENSE.txt' } : e));
   entries.push({ name: top + '先看我.txt', data: fs.readFileSync(path.join(SRC, 'desktop', 'README-桌面版.txt')) });
   console.log('  压缩中，要一两分钟…');
-  return save(`百宝匣-桌面版-${VERSION}.zip`, makeZip(assertUnique(entries)));
+  return save(`Baibaoxia-Desktop-${VERSION}.zip`, makeZip(assertUnique(entries)));
 }
 
 // ---------------------------------------------------------------- 小更新包
@@ -142,7 +142,7 @@ async function buildDesktop() {
 function buildUpdate() {
   console.log('小更新包…');
   const buf = updater.build(SRC, { version: VERSION, notes: opt('notes') || '', from: opt('from'), electron: ELECTRON || undefined });
-  return save(`百宝匣更新-${VERSION}.bbupdate`, buf);
+  return save(`Baibaoxia-Update-${VERSION}.bbupdate`, buf);
 }
 
 (async () => {

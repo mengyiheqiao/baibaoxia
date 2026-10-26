@@ -64,7 +64,7 @@
 
 ### 桌面版（推荐，Windows 10 / 11）
 
-1. 下载 `百宝匣-桌面版-x.x.x.zip`
+1. 下载 `Baibaoxia-Desktop-x.x.x.zip`
 2. 解压到一个你常用的地方，比如 `D:\百宝匣`（**不要**放在 `C:\Program Files` 里，否则没法保存数据和更新）
 3. 双击里面的 `百宝匣.exe`
 
@@ -75,7 +75,7 @@
 ### 网页版（Windows / macOS / Linux）
 
 1. 先装 [Node.js](https://nodejs.org)，20 或更新的版本都行
-2. 下载 `百宝匣-网页版-x.x.x.zip` 并解压
+2. 下载 `Baibaoxia-Web-x.x.x.zip` 并解压
 3. Windows：双击 `启动百宝匣.bat`；macOS / Linux：在文件夹里运行 `node server.js`
 4. 浏览器会自动打开 http://127.0.0.1:3456
 
@@ -91,7 +91,7 @@
 
 ### 升级
 
-- 已经在用 0.11.0 或更新的版本：下载 `百宝匣更新-x.x.x.bbupdate`，拖进百宝匣窗口
+- 已经在用 0.11.0 或更新的版本：下载 `Baibaoxia-Update-x.x.x.bbupdate`，拖进百宝匣窗口
 - 更老的版本：先彻底退出百宝匣（桌面版：右键托盘图标 → 退出），再把新的完整版解压覆盖进去
 
 两种方式都不会动你的数据。
