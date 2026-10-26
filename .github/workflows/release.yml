@@ -28,10 +28,13 @@ jobs:
         run: |
           V=$(node -p "require('./package.json').version")
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          if gh release view "v$V" >/dev/null 2>&1; then
+          DRAFT=$(gh release view "v$V" --json isDraft -q .isDraft 2>/dev/null || echo none)
+          if [ "$DRAFT" = "false" ]; then
             echo "v$V 已经发布过了，这次不用发布"
             echo "need=false" >> "$GITHUB_OUTPUT"
           else
+            # 上次没发布成功留下的草稿，删掉重来
+            if [ "$DRAFT" = "true" ]; then gh release delete "v$V" --yes; fi
             echo "need=true" >> "$GITHUB_OUTPUT"
           fi
 
