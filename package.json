@@ -8,9 +8,16 @@
   "license": "MIT",
   "author": "mengyiheqiao",
   "homepage": "https://github.com/mengyiheqiao/baibaoxia",
-  "repository": { "type": "git", "url": "https://github.com/mengyiheqiao/baibaoxia.git" },
-  "bugs": { "url": "https://github.com/mengyiheqiao/baibaoxia/issues" },
-  "engines": { "node": ">=20" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mengyiheqiao/baibaoxia.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mengyiheqiao/baibaoxia/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js",
     "desktop": "electron .",
@@ -18,7 +25,8 @@
     "build:web": "node scripts/build.js web",
     "build:desktop": "node scripts/build.js desktop",
     "build:update": "node scripts/build.js update",
-    "check": "node scripts/check.js"
+    "check": "node scripts/check.js",
+    "manual": "node scripts/manual.js"
   },
   "devDependencies": {
     "electron": "44.9.3",

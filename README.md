@@ -6,7 +6,7 @@
 
 所有东西都存在你自己的电脑里，不用注册，不用联网。
 
-[下载](https://github.com/mengyiheqiao/baibaoxia/releases/latest) · [使用说明](defaults/记忆区/百宝匣使用说明.md) · [做皮肤](皮肤示例/皮肤制作说明.md) · [English](#english)
+[下载](https://github.com/mengyiheqiao/baibaoxia/releases/latest) · [使用手册](docs/使用手册.md) · [做皮肤](皮肤示例/皮肤制作说明.md) · [English](#english)
 
 ![工具区](docs/images/tools.png)
 
@@ -57,6 +57,8 @@
 </table>
 
 ## 下载安装
+
+第一次使用的步骤、每个功能的用法和常见问题见 **[使用手册](docs/使用手册.md)**。
 
 到 [Releases 页面](https://github.com/mengyiheqiao/baibaoxia/releases/latest) 下载。
 
@@ -112,6 +114,7 @@ npm start              # 网页版：http://127.0.0.1:3456
 npm install            # 想跑桌面版或者打包时才需要（会下载 Electron）
 npm run desktop        # 桌面版
 npm run check          # 检查所有文件有没有语法错误
+npm run manual         # 改了 defaults/记忆区/百宝匣使用说明.md 后，重新生成 docs/使用手册.md
 npm run build          # 打包到 dist/：网页版、桌面版、小更新包
 ```
 
