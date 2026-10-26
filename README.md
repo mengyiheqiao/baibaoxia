@@ -131,14 +131,7 @@ npm run build          # 打包到 dist/：网页版、桌面版、小更新包
 | `皮肤示例/` | 做皮肤的说明和示例 |
 | `scripts/` | 打包和检查脚本 |
 
-**发布新版本**：改 `package.json`、`server.js`（`VERSION`）和 `public/app.js`（`APP_VERSION`）里的版本号，提交，然后打标签推送：
-
-```bash
-git tag v0.11.1
-git push origin v0.11.1
-```
-
-GitHub Actions 会自动打好三个包，发布到 Releases 页面。
+**发布新版本**：把 `package.json`、`server.js`（`VERSION`）和 `public/app.js`（`APP_VERSION`）里的版本号改成新的，提交并推到 main。GitHub Actions 发现是没发布过的版本，就会自动打标签，打好三个包（桌面版、网页版、小更新包），发布到 Releases 页面。
 
 有问题或想法，欢迎提 [Issue](https://github.com/mengyiheqiao/baibaoxia/issues)。更多说明见 [docs](docs/) 文件夹。
 

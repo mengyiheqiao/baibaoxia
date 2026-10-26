@@ -1,8 +1,10 @@
-# 推送 v 开头的标签（比如 v0.11.0）时，自动打包并发布到 Releases 页面
+# 自动发布：package.json 里的版本号变了并推到 main 时，自动打标签、打包、发布到 Releases 页面。
+# 也可以推送 v 开头的标签，或者在 Actions 页面手动运行。
 name: 发布新版本
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -19,30 +21,39 @@ jobs:
         with:
           node-version: 22
 
+      - name: 看看这个版本发布过没有
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(node -p "require('./package.json').version")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "v$V 已经发布过了，这次不用发布"
+            echo "need=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "need=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 检查语法
         run: node scripts/check.js
 
       - name: 装打包工具（不下载 Electron 本体）
+        if: steps.ver.outputs.need == 'true'
         run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: 打包
+        if: steps.ver.outputs.need == 'true'
         run: node scripts/build.js all
 
       - name: 发布
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.ver.outputs.need == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: 百宝匣 ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: 百宝匣 v${{ steps.ver.outputs.version }}
           body_path: docs/发布说明.md
           files: |
-            dist/*.zip
-            dist/*.bbupdate
-
-      - name: 手动运行时，把打好的包存成附件
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: 百宝匣
-          path: |
             dist/*.zip
             dist/*.bbupdate
