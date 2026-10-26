@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "百宝匣剪藏",
+  "version": "0.8.1",
+  "description": "选中一段文字，点右下角冒出来的小图标就存进百宝匣；也能一键存整篇文章，图片会存到本地。",
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": ["http://127.0.0.1:3456/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "exclude_matches": ["http://127.0.0.1:3456/*", "http://localhost:3456/*"],
+    "js": ["clip.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "action": { "default_popup": "popup.html", "default_title": "存进百宝匣", "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" } },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}

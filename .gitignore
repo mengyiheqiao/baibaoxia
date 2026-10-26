@@ -1,0 +1,24 @@
+# 你自己的数据：第一次运行时会从 defaults 文件夹自动生成，不要传到网上
+/tools.json
+/tools.json.bak
+/layout.json
+/settings.json
+/统计.json
+/记忆区/
+/私密区/
+/图标/
+/皮肤/
+/运行记录/
+/恢复前的旧文件/
+/.待删除/
+*.活页.json
+
+# 打包和依赖
+/dist/
+node_modules/
+package-lock.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

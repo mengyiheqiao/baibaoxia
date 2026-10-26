@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  body { width: 280px; margin: 0; padding: 14px 16px; font: 14px/1.6 "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif; color: #1d2a27; background: #f7f5ee; }
+  h1 { font: 600 17px "Noto Serif SC", "SimSun", serif; margin: 0 0 6px; letter-spacing: .08em; }
+  .title { font-size: 13px; color: #5d6c67; margin-bottom: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { display: block; width: 100%; margin: 6px 0; padding: 8px; border-radius: 6px; border: 1px solid #cfd4cb; background: #fbfaf6; cursor: pointer; font: inherit; }
+  button.primary { background: #2f4a43; border-color: #2f4a43; color: #f3f1ea; }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { margin-top: 10px; font-size: 13px; min-height: 1.4em; }
+  .ok { color: #2f7a52; } .err { color: #c4503a; }
+  .tip { font-size: 12px; color: #5d6c67; margin-top: 8px; }
+  .how { font-size: 12.5px; background: #fff6dc; border: 1px solid #e2c87e; border-radius: 6px; padding: 8px 10px; margin: 10px 0 8px; }
+  .sw { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 4px 0; cursor: pointer; }
+  .sw input { accent-color: #2f4a43; }
+</style>
+</head>
+<body>
+  <h1>存进百宝匣</h1>
+  <div class="title" id="title"></div>
+  <button class="primary" id="page">存整篇文章</button>
+  <div class="msg" id="msg"></div>
+  <div class="how">只想存一段：在网页上<b>用鼠标选中文字</b>，选区右下角会冒出一个小图标，点一下就存好了。同一个网页存的几段会放进同一篇"摘录"。</div>
+  <label class="sw"><input type="checkbox" id="float"> 选中文字后显示小图标</label>
+  <label class="sw"><input type="checkbox" id="site"> 在这个网站上不显示</label>
+  <div class="tip">也可以在网页上点右键 →"存进百宝匣"。</div>
+  <script src="popup.js"></script>
+</body>
+</html>

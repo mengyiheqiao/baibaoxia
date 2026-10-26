@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>百宝匣</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='6' width='26' height='22' rx='2' fill='%2335524a'/%3E%3Crect x='3' y='6' width='26' height='7' fill='%23253a34'/%3E%3Ccircle cx='16' cy='20' r='3' fill='%23c4a25a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="bar">
+  <h1 class="mark">百宝匣</h1>
+  <label class="search">
+    <span class="sr">搜索</span>
+    <input id="q" type="search" placeholder="搜工具或说明，回车直接打开" autocomplete="off">
+    <kbd>/</kbd>
+  </label>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-view="tools" aria-selected="true">工具区</button>
+    <button role="tab" data-view="memory" aria-selected="false">记忆区</button>
+  </nav>
+  <button id="ask-ai" class="btn ask main-only" type="button">问问</button>
+  <button id="leave-private" class="btn leave" type="button" hidden>锁上离开</button>
+  <button id="settings" class="gear" type="button" aria-label="设置">⚙</button>
+</header>
+
+<main>
+  <section id="view-tools" class="view">
+    <div id="tools-error" class="banner" hidden></div>
+    <div class="tool-bar">
+      <button id="new-section" class="btn">＋ 新建栏目</button>
+      <span id="checkup-note" class="checkup-note" hidden></span>
+      <span class="spacer"></span>
+      <button id="open-checkup" class="btn ghost">体检</button>
+      <button id="open-stats" class="btn ghost main-only">统计</button>
+    </div>
+    <div id="tool-area"></div>
+    <p class="foot">点抽屉就用，右上角的 ⋯ 可以停止、修改或拿掉。按住抽屉可以拖动排序，拖到栏目上就放进那个栏目。</p>
+  </section>
+
+  <section id="view-memory" class="view" hidden>
+    <aside class="shelf">
+      <div class="shelf-actions">
+        <button id="new-note" class="btn primary">新建说明</button>
+        <button id="open-mem-folder" class="btn ghost">打开文件夹</button>
+        <button id="open-mem-stats" class="btn ghost main-only">统计</button>
+      </div>
+      <div id="binder" class="binder"></div>
+      <div id="loose-h" class="loose-h" hidden><span>还没放进活页的</span><small>拖到上面的标签上就放进去</small></div>
+      <h2 class="shelf-h">说明</h2>
+      <ul id="note-list" class="list"></ul>
+      <div id="clip-group" class="clip-group" hidden></div>
+      <h2 class="shelf-h">资料</h2>
+      <ul id="file-list" class="list"></ul>
+      <p class="drop-hint">把 PDF、电子书、Word、Excel、PPT、Markdown 文件拖到这个窗口就会收进来，里面的文字也能搜到。</p>
+      <button id="open-trash" class="btn ghost trash-btn" type="button">回收站</button>
+    </aside>
+    <article id="reader" class="reader">
+      <div class="empty">
+        <p>左边选一篇说明来看，或者新建一篇。</p>
+      </div>
+    </article>
+  </section>
+
+  <section id="view-reader" class="view" hidden>
+    <div class="reader-bar">
+      <button class="btn ghost" data-rd="back">← 返回</button>
+      <div class="rd-title"><strong id="rd-title"></strong><span id="rd-chapter"></span></div>
+      <button class="btn ghost" data-rd="notes">笔记</button>
+      <button class="btn ghost" data-rd="toc" aria-label="目录">目录</button>
+      <button class="btn ghost" data-rd="smaller" aria-label="字小一点">A−</button>
+      <button class="btn ghost" data-rd="bigger" aria-label="字大一点">A+</button>
+    </div>
+    <div class="reader-body">
+      <nav id="rd-toc" class="rd-toc" aria-label="目录"></nav>
+      <div class="rd-page">
+        <iframe id="rd-frame" title="电子书内容" sandbox="allow-same-origin"></iframe>
+        <div class="rd-nav">
+          <button class="btn" data-rd="prev">上一章</button>
+          <span id="rd-pos"></span>
+          <button class="btn" data-rd="next">下一章</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-search" class="view" hidden>
+    <div id="results"></div>
+  </section>
+</main>
+
+<aside id="panel" class="panel" hidden aria-labelledby="panel-title">
+  <div class="panel-inner"></div>
+</aside>
+<div id="scrim" class="scrim" hidden></div>
+<div id="dropzone" class="dropzone" hidden><div class="dz-inner"><p id="dz-text">松手就收进记忆区<br><small>.bbskin 皮肤文件会直接装上</small></p><div id="drop-pages" class="drop-pages"></div></div></div>
+<div id="ctx" class="ctx" hidden role="menu"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="/markdown.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

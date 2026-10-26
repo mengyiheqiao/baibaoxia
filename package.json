@@ -1,0 +1,27 @@
+{
+  "name": "baibaoxia",
+  "productName": "百宝匣",
+  "version": "0.11.0",
+  "description": "百宝匣：一键打开常用工具 + 自己的说明和资料库，全部存在本机",
+  "main": "desktop/main.js",
+  "private": true,
+  "license": "MIT",
+  "author": "mengyiheqiao",
+  "homepage": "https://github.com/mengyiheqiao/baibaoxia",
+  "repository": { "type": "git", "url": "https://github.com/mengyiheqiao/baibaoxia.git" },
+  "bugs": { "url": "https://github.com/mengyiheqiao/baibaoxia/issues" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "desktop": "electron .",
+    "build": "node scripts/build.js all",
+    "build:web": "node scripts/build.js web",
+    "build:desktop": "node scripts/build.js desktop",
+    "build:update": "node scripts/build.js update",
+    "check": "node scripts/check.js"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "resedit": "^2.0.3"
+  }
+}
