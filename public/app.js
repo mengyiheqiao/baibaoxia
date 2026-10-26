@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.12.0';
+  const APP_VERSION = '0.13.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -167,7 +167,7 @@
     const busyText = state.status[t.id] && state.status[t.id].busy;
     const ck = state.checkup[t.id];
     const warn = ck && ck.level !== 'ok' ? ck : null;
-    return `<div class="drawer${t.private ? ' private' : ''}" data-id="${esc(t.id)}" data-state="${st}" draggable="true">
+    return `<div class="drawer${t.private ? ' private' : ''}" data-id="${esc(t.id)}" data-state="${st}" data-heat="${Number(t.heat) || 0}" draggable="true">
         <button class="face" type="button" title="${esc(warn ? '体检：' + warn.message : (t.desc || t.name))}">
           <span class="lamp" aria-hidden="true"></span>
           ${warn ? `<span class="ck-badge ${warn.level}" aria-label="体检有问题">!</span>` : ''}

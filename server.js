@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -1940,8 +1940,12 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/tools' && req.method === 'GET') {
       const t = readTools();
+      // 亮度 0~5：按使用次数算，皮肤可以用它让常用的工具更显眼（私密区不记统计，都是 0）
+      const used = space === 'main' ? readStats()['工具'] : {};
+      const max = Math.max(1, ...Object.values(used).map(e => e['次数'] || 0));
+      const heat = id => { const c = (used[id] && used[id]['次数']) || 0; return c ? Math.max(1, Math.ceil(5 * Math.log(1 + c) / Math.log(1 + max))) : 0; };
       return send(res, 200, {
-        tools: t.tools.filter(x => inSpace(x, space) && canSee(req, x)), error: t.error,
+        tools: t.tools.filter(x => inSpace(x, space) && canSee(req, x)).map(x => ({ ...x, heat: heat(x.id) })), error: t.error,
         sections: readLayout(space).sections,
         private: { hasPassword: hasPassword(), unlocked: hasPassword() && isUnlocked(req) },
       });
