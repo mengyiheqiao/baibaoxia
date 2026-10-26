@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.13.0';
+  const APP_VERSION = '0.14.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2833,6 +2833,7 @@
       if (link) link.remove();
       delete document.body.dataset.skin;
       state.skinId = 'original';
+      if (typeof loadMascot === 'function') setTimeout(loadMascot, 0);
       return;
     }
     const href = `/skin/${encodeURIComponent(id)}/skin.css`;
@@ -2845,6 +2846,7 @@
     if (link.getAttribute('href') !== href) link.setAttribute('href', href);
     document.body.dataset.skin = id.replace(/[^\w一-龥-]/g, '');
     state.skinId = id;
+    if (typeof loadMascot === 'function') setTimeout(loadMascot, 0);
   }
 
   async function syncSkin() {
@@ -2885,6 +2887,7 @@
       <strong>${priv ? '私密区的皮肤' : '皮肤'}</strong>
       <p class="sub">${priv ? '私密区单独选一套，和外面互不影响。' : '换一身样子，功能都不变。'}也可以把皮肤文件（.bbskin）拖进来，像装游戏 mod 一样，装好就能换上。</p>
       <div class="skin-grid">${cards}</div>
+      ${(r.skins.find(k => k.id === r.current) || {}).mascot ? `<label class="check"><input type="checkbox" id="mascot-on" ${mcOff() ? '' : 'checked'}> <span>显示看板娘<br><small>这套皮肤带了立绘：会呼吸、眨眼，跟着"问问"的回答换动作，点她就能聊天。很久不操作她会犯困。</small></span></label>` : ''}
       <label class="skin-drop" id="skin-drop">
         <input type="file" id="skin-file" accept=".bbskin,.zip" hidden>
         <span>把 <b>.bbskin</b> 皮肤文件拖到这里，或者<u>点这里选文件</u></span>
@@ -2951,6 +2954,11 @@
   }
 
   $('#panel').addEventListener('change', e => {
+    if (e.target.id === 'mascot-on') {
+      try { localStorage.setItem('bb-mascot-off', e.target.checked ? '0' : '1'); } catch {}
+      loadMascot();
+      return;
+    }
     if (e.target.id === 'skin-file' && e.target.files[0]) importSkinFile(e.target.files[0]);
     if (e.target.id === 'update-file' && e.target.files[0]) { const f = e.target.files[0]; e.target.value = ''; installUpdate(f); }
   });
@@ -3034,6 +3042,8 @@
   async function leavePrivate(auto) {
     if (state.space !== 'private') return;
     if (state.editing && !auto && !confirmLeave()) return;
+    // 看板娘可能还在取这边的皮肤，等它取完再上锁，免得请求被拒
+    if (mc.pending) await mc.pending;
     if (!auto) await api('/api/private/lock', { method: 'POST' });
     resetSpaceState();
     state.space = 'main';
@@ -3248,7 +3258,113 @@
     state.mood = mood || '待机';
     const f = $('#butler-face');
     if (f) { f.dataset.mood = state.mood; f.querySelector('.bf-emoji').textContent = MOOD_FACE[state.mood] || '😌'; f.querySelector('.bf-mood').textContent = state.mood; }
+    mascotMood(state.mood);
   }
+
+  // ---------------------------------------------------------------- 看板娘（皮肤自带的立绘）
+  const MC_FALLBACK = { 找到了: '开心', 玩游戏: '待机', 说话: '待机', 思考: '待机', 开心: '待机', 惊讶: '待机', 困: '待机' };
+  const mc = { cfg: null, skin: '', mood: '待机', back: null, blinkT: 0, lastAct: Date.now(), bubbleT: 0, token: 0 };
+  const mcOff = () => { try { return localStorage.getItem('bb-mascot-off') === '1'; } catch { return false; } };
+  function mcSrc(mood) {
+    const imgs = mc.cfg.images;
+    let m = mood;
+    while (m && !imgs[m]) m = MC_FALLBACK[m];
+    return `/skin/${encodeURIComponent(mc.skin)}/${imgs[m || '待机'].split('/').map(encodeURIComponent).join('/')}`;
+  }
+  function loadMascot() {
+    mc.pending = loadMascotNow().catch(() => {});
+    return mc.pending;
+  }
+  async function loadMascotNow() {
+    const box = $('#mascot');
+    const token = ++mc.token;
+    box.hidden = true;
+    document.body.classList.remove('has-mascot');
+    mc.cfg = null;
+    const r = await api('/api/skins');
+    if (token !== mc.token || !r || !r.skins) return;
+    const k = r.skins.find(x => x.id === r.current);
+    if (!k || !k.mascot || SKIN_OFF || mcOff()) return;
+    mc.cfg = k.mascot; mc.skin = k.id; mc.mood = '待机';
+    for (const m of Object.keys(mc.cfg.images)) { const im = new Image(); im.src = mcSrc(m); }
+    const [a, b] = box.querySelectorAll('.mc-img');
+    a.src = mcSrc('待机'); a.classList.add('on'); b.classList.remove('on');
+    box.querySelector('.mc-body').setAttribute('aria-label', `和${mc.cfg.name || butlerName()}说话`);
+    box.className = '';
+    box.hidden = false;
+    document.body.classList.add('has-mascot');
+    mcBlinkLoop();
+    const h = new Date().getHours();
+    mcSay(h < 5 ? '这么晚了……早点休息吧。' : h < 11 ? '早上好。' : h < 14 ? '中午好。' : h < 18 ? '下午好。' : h < 23 ? '晚上好。' : '夜深了……', 5000);
+  }
+  function mcSay(text, ms = 4000) {
+    const bub = $('#mascot .mc-bubble');
+    if (!bub || !mc.cfg) return;
+    bub.textContent = text;
+    bub.hidden = false;
+    clearTimeout(mc.bubbleT);
+    mc.bubbleT = setTimeout(() => { bub.hidden = true; }, ms);
+  }
+  function mascotMood(mood) {
+    if (!mc.cfg) return;
+    const box = $('#mascot');
+    const src = mcSrc(mood);
+    const imgs = box.querySelectorAll('.mc-img');
+    const front = [...imgs].find(i => i.classList.contains('on')) || imgs[0];
+    const back = front === imgs[0] ? imgs[1] : imgs[0];
+    mc.mood = mood;
+    box.dataset.mood = mood;
+    // 一次性的小动作
+    box.classList.remove('mc-hop', 'mc-shake');
+    void box.offsetWidth;
+    if (mood === '找到了' || mood === '开心') box.classList.add('mc-hop');
+    if (mood === '惊讶') box.classList.add('mc-shake');
+    if (front.getAttribute('src') === src) return;
+    back.src = src;
+    const swap = () => { back.classList.add('on'); front.classList.remove('on'); };
+    if (back.complete) swap(); else back.onload = swap;
+    // 回答完过一会儿回到待机
+    clearTimeout(mc.backT);
+    if (!['待机', '思考', '困', '玩游戏'].includes(mood)) mc.backT = setTimeout(() => { if (mc.mood === mood) mascotMood('待机'); }, 9000);
+  }
+  // 眨眼：待机时每隔几秒闭一下眼
+  function mcBlinkLoop() {
+    clearTimeout(mc.blinkT);
+    mc.blinkT = setTimeout(() => {
+      if (!mc.cfg) return;
+      const closed = mc.cfg.images['待机-闭眼'];
+      const front = $('#mascot .mc-img.on');
+      if (closed && mc.mood === '待机' && front && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const open = front.getAttribute('src');
+        const shut = mcSrc('待机-闭眼');
+        front.src = shut;
+        setTimeout(() => {
+          if (front.getAttribute('src') === shut) front.src = open;
+          // 偶尔连眨两下
+          if (Math.random() < .25) setTimeout(() => { if (mc.mood === '待机') { front.src = shut; setTimeout(() => { if (front.getAttribute('src') === shut) front.src = open; }, 120); } }, 220);
+        }, 130);
+      }
+      mcBlinkLoop();
+    }, 2500 + Math.random() * 3500);
+  }
+  // 很久没动：先犯困，再低头玩游戏；一动就醒
+  function mcActivity() {
+    mc.lastAct = Date.now();
+    if (mc.cfg && (mc.mood === '困' || mc.mood === '玩游戏')) { mascotMood('惊讶'); setTimeout(() => { if (mc.mood === '惊讶') mascotMood('待机'); }, 900); }
+  }
+  ['pointerdown', 'keydown', 'wheel'].forEach(ev => window.addEventListener(ev, mcActivity, { passive: true }));
+  setInterval(() => {
+    if (!mc.cfg || document.hidden) return;
+    const idle = Date.now() - mc.lastAct;
+    if (idle > 240000 && mc.mood !== '玩游戏' && mc.cfg.images['玩游戏']) mascotMood('玩游戏');
+    else if (idle > 90000 && mc.mood === '待机') { mascotMood('困'); mcSay('……有点困了。', 3500); }
+  }, 10000);
+  $('#mascot').addEventListener('click', e => {
+    if (!e.target.closest('.mc-body')) return;
+    mascotMood('惊讶');
+    setTimeout(() => mascotMood('开心'), 450);
+    if (!($('#panel') && !$('#panel').hidden && $('#chat-log'))) openChat();
+  });
 
   async function openChat() {
     if (state.aiFree === undefined) {
@@ -3660,6 +3776,7 @@
 
   (async function init() {
     await initDesktop();
+    loadMascot();
     const v = await api('/api/version');
     if (v.version !== APP_VERSION) {
       const b = document.createElement('div');
