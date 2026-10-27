@@ -60,3 +60,4 @@ jobs:
           files: |
             dist/*.zip
             dist/*.bbupdate
+            dist/*.html

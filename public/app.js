@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.15.0';
+  const APP_VERSION = '0.16.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -37,7 +37,7 @@
 
   async function api(path, opts = {}) {
     // 在私密区里，所有请求都带上 space=private
-    if (state.space === 'private' && path.startsWith('/api/') && !path.startsWith('/api/private')) {
+    if (state.space === 'private' && path.startsWith('/api/') && !path.startsWith('/api/private') && !/^\/api\/(pocket|box)\b/.test(path)) {
       path += (path.includes('?') ? '&' : '?') + 'space=private';
     }
     const headers = { ...(opts.headers || {}) };
@@ -630,6 +630,7 @@
           ${t.setup ? `<dt>自动安装</dt><dd>缺少 ${esc(t.setup.missing)} 时先运行 <code>${esc(t.setup.run)}</code></dd>` : ''}
         </dl>
         ${ghBox}
+        ${state.space === 'main' && !t.private ? `<div id="carry-box" class="carry-box">${state.carry && state.carry[t.id] ? carryHtml(t, state.carry[t.id]) : ''}</div>` : ''}
         ${t.type === 'service' ? `<button class="btn ghost" data-act="log">${logOpen ? '刷新运行记录' : '看运行记录'}</button>
         <pre class="log" ${logOpen ? '' : 'hidden'}>${esc(logText)}</pre>` : ''}`;
     }
@@ -645,7 +646,110 @@
         <button class="btn" data-act="edit-tool">修改这个工具</button>
         <button class="btn ghost danger" data-act="delete-tool">从柜子里拿掉</button>
       </div>`;
+    if ($('#carry-box')) loadCarry(t);
   }
+
+  // ---- 带走方式：工具在这台电脑上没有的时候怎么办（0.16）
+  async function loadCarry(t) {
+    if (!state.carry) state.carry = {};
+    const c = state.carry[t.id];
+    if (c && Date.now() - c.at < 4000) return;
+    const r = await api(`/api/tools/${encodeURIComponent(t.id)}/carry`);
+    if (!r || !r.ok) return;
+    r.at = Date.now();
+    state.carry[t.id] = r;
+    const box = $('#carry-box');
+    if (box && state.panelTool === t.id) { const open = box.querySelector('details[open]'); box.innerHTML = carryHtml(t, r); if (open && box.querySelector('details')) box.querySelector('details').open = true; }
+  }
+
+  function carryHtml(t, c) {
+    if (!c.canCarry) return '';
+    const k = c.kit;
+    const has = k || c.download || c.note || c.source;
+    return `
+      ${c.missing ? `<div class="carry-miss">
+        <b>这台电脑上没有它</b>
+        <div class="btn-row">
+          ${k ? `<button class="btn primary" data-act="cy-kit-use" ${k.pulling ? 'disabled' : ''}>${k.local ? '用安装包打开' : `从末影箱拿安装包（${fmtSize(k.size)}）`}</button>` : ''}
+          ${c.download ? '<button class="btn" data-act="cy-dl-open">去下载页</button>' : ''}
+          ${c.source ? '<button class="btn" data-act="cy-refetch">从 GitHub 重新下载</button>' : ''}
+          ${c.note ? `<button class="btn" data-act="note">看安装说明</button>` : ''}
+          <button class="btn ghost" data-act="cy-locate">它在这台电脑的别的位置…</button>
+        </div>
+        ${has ? '' : '<p class="sub">在原来那台电脑上，给它填好下面的"带走方式"（下载网址或者安装包），这里就能用了。</p>'}
+      </div>` : ''}
+      ${c.localPos ? `<p class="sub">这台电脑上它在：${esc(Object.values(c.localPos)[0])}　<button class="link-btn" data-act="cy-reset">用回原来的位置</button></p>` : ''}
+      <details class="carry-edit"${c.missing && !has ? ' open' : ''}>
+        <summary>带走方式：别的电脑上没有它时怎么办</summary>
+        <label class="field"><span>下载网址</span>
+          <span class="with-btn"><input id="cy-dl" value="${esc(c.download)}" placeholder="官网下载页，或者绿色版的下载地址" spellcheck="false"><button class="btn" data-act="cy-save">保存</button></span>
+        </label>
+        <div class="field"><span>安装包</span>
+          <div>${k ? `${fileGlyph(k.name)} ${esc(k.name)} · ${fmtSize(k.size)}${k.local ? '' : '（在末影箱里）'}　<button class="link-btn" data-act="cy-kit-pick">换一个</button>　<button class="link-btn danger" data-act="cy-kit-del">拿掉</button>`
+            : '<button class="btn small" data-act="cy-kit-pick">放一个安装包或绿色版 zip</button>'}</div>
+          <small>最好放绿色版 zip：别的电脑上点一下就解压打开，不用安装，也不要管理员权限（学校、网吧的电脑大多不让装软件）。会加密存进末影箱，用的时候才下载。</small>
+          <input type="file" id="cy-file" hidden>
+        </div>
+        <p class="sub">"看安装说明"用的是这个工具的说明书，在"修改这个工具"里可以挑一篇说明当说明书。</p>
+        ${!c.box.connected || !c.box.tools ? '<p class="sub carry-warn">末影箱还没打开"同步工具"，别的电脑上看不到这些。在 口袋 → 末影箱设置 里打开。</p>' : ''}
+      </details>`;
+  }
+
+  async function carryAct(act, b) {
+    const t = state.tools.find(x => x.id === state.panelTool);
+    if (!t) return;
+    const enc = encodeURIComponent(t.id);
+    const c = (state.carry || {})[t.id] || {};
+    const done = async () => { delete state.carry[t.id]; await loadTools(); renderPanel(); };
+    if (act === 'cy-save') {
+      const r = await api(`/api/tools/${enc}/carry`, { method: 'POST', json: { download: $('#cy-dl').value } });
+      toast(r.ok ? '保存好了' : r.message);
+      return done();
+    }
+    if (act === 'cy-dl-open') return window.open(c.download, '_blank', 'noopener');
+    if (act === 'cy-kit-pick') return $('#cy-file').click();
+    if (act === 'cy-kit-del') {
+      if (!confirm('拿掉这个安装包？末影箱里的也会删掉。')) return;
+      await api(`/api/tools/${enc}/kit-remove`, { method: 'POST' });
+      return done();
+    }
+    if (act === 'cy-kit-use') {
+      b.disabled = true;
+      toast(c.kit && !c.kit.local ? '正在从末影箱拿安装包，大的要等一会儿…' : '正在准备…', 600000);
+      const r = await api(`/api/tools/${enc}/kit-use`, { method: 'POST' });
+      toast(r.message || (r.ok ? '好了' : '没成功'), 8000);
+      return done();
+    }
+    if (act === 'cy-refetch') {
+      b.disabled = true;
+      toast('正在从 GitHub 下载…', 600000);
+      const r = await api(`/api/tools/${enc}/refetch`, { method: 'POST' });
+      toast(r.message || (r.ok ? '下载好了' : '没下载下来'), 8000);
+      return done();
+    }
+    if (act === 'cy-locate') {
+      const v = await ask({ title: '它在这台电脑的哪里？', text: t.type === 'program' ? '填程序文件（.exe）的位置。在文件资源管理器里按住 Shift 右键这个文件 → "复制文件地址"，粘贴到这里。只对这台电脑有效，不会改别的电脑上的设置。' : '填文件夹的位置。在文件资源管理器里打开这个文件夹，点顶部地址栏复制，粘贴到这里。只对这台电脑有效。', fields: [{ name: 'path', label: '位置', value: '' }], okText: '就是这里' });
+      if (!v) return;
+      const r = await api(`/api/tools/${enc}/locate`, { method: 'POST', json: { path: v.path } });
+      toast(r.ok ? '记住了，以后在这台电脑上就打开这里' : r.message, 5000);
+      return done();
+    }
+    if (act === 'cy-reset') {
+      await api(`/api/tools/${enc}/locate`, { method: 'POST', json: { reset: true } });
+      return done();
+    }
+  }
+
+  $('#panel').addEventListener('change', async e => {
+    if (e.target.id !== 'cy-file' || !e.target.files[0]) return;
+    const t = state.tools.find(x => x.id === state.panelTool);
+    const f = e.target.files[0];
+    toast(`正在放进 ${f.name}…`, 600000);
+    const r = await api(`/api/tools/${encodeURIComponent(t.id)}/kit?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f, headers: { 'Content-Type': 'application/octet-stream' } });
+    toast(r.ok ? (r.box && r.box.connected && r.box.tools ? '放好了，马上加密传进末影箱' : '放好了') : (r.message || '没放进去'), 5000);
+    delete state.carry[t.id];
+    await loadTools(); renderPanel();
+  });
 
   $('#panel').addEventListener('click', async e => {
     const b = e.target.closest('[data-act]');
@@ -656,6 +760,7 @@
     if (/^ocr-/.test(b.dataset.act)) return ocrAct(b.dataset.act);
     if (/^trash-/.test(b.dataset.act)) return trashAct(b.dataset.act, b);
     if (/^pk-/.test(b.dataset.act)) return pocketAct(b.dataset.act, b);
+    if (/^cy-/.test(b.dataset.act)) return carryAct(b.dataset.act, b);
     if (b.dataset.act === 'enter-private') { closePanel(); return togglePrivate(); }
     if (b.dataset.act === 'ck-run') return runCheckupUI(false);
     if (b.dataset.act === 'ck-deep') return runCheckupUI(true);
@@ -1782,6 +1887,7 @@
     if (!r.notes) { toast(r.message || '记忆区读取失败，刷新一下试试', 5000); return; }
     state.notes = r.notes || [];
     state.files = r.files || [];
+    state.cloudFiles = r.cloud || [];
     state.trashCount = r.trash || 0;
     const tb = $('#open-trash');
     if (tb) tb.textContent = state.trashCount ? `回收站（${state.trashCount}）` : '回收站';
@@ -1828,9 +1934,23 @@
           <button type="button" data-file-act="delete" class="danger" aria-label="删除 ${esc(f.name)}">删除</button>
         </span>
       </li>`).join('') : `<li class="none">${state.files.length ? '都放进活页了。' : '还没有资料。'}</li>`;
+    // 末影箱里的大资料：要用时再拿下来
+    if (state.space === 'main' && (state.cloudFiles || []).length) $('#file-list').insertAdjacentHTML('beforeend', state.cloudFiles.map(f => `
+      <li class="file-row cloud-row" title="在末影箱里${f.by ? `，来自${esc(f.by)}` : ''}">
+        <span class="t">☁ ${esc(f.name)}</span><span class="s">${fmtSize(f.size)} · ${f.pulling ? '正在拿下来…' : '在末影箱里'}</span>
+        <span class="file-acts" style="opacity:1"><button type="button" data-cloud-pull="${esc(f.key)}" ${f.pulling ? 'disabled' : ''}>拿下来</button></span>
+      </li>`).join(''));
   }
 
   $('#file-list').addEventListener('click', async e => {
+    const cp = e.target.closest('[data-cloud-pull]');
+    if (cp) {
+      cp.disabled = true;
+      const r = await api('/api/box/pull', { method: 'POST', json: { key: cp.dataset.cloudPull } });
+      toast(r.ok ? '正在从末影箱拿下来，好了会出现在资料里' : r.message, 4000);
+      if (r.ok) { let n = 0; const t = setInterval(() => { loadNotes(); if (++n > 20 || !(state.cloudFiles || []).some(f => f.key === cp.dataset.cloudPull)) clearInterval(t); }, 3000); }
+      return;
+    }
     const open = e.target.closest('[data-open]');
     if (open && /\.epub$/i.test(open.dataset.open)) { e.preventDefault(); return openReader(open.dataset.open); }
     if (open && OFFICE_RE.test(open.dataset.open)) { e.preventDefault(); return openOffice(open.dataset.open); }
@@ -3797,9 +3917,16 @@
   }
 
   async function refreshPocket() {
+    if (state.space === 'private') return;
     const r = await api('/api/pocket');
     if (!r || !r.items) { if (r && r.message) toast(r.message); return; }
     pk.items = r.items; pk.box = r.box || {}; pk.temp = !!r.temp;
+    // 同步过一次（可能从别的电脑带来了工具、说明），刷新一下
+    if (pk.box.lastChange && pk.seenSync !== undefined && pk.box.lastChange !== pk.seenSync && (pk.box.sync.memory || pk.box.sync.tools)) {
+      if (pk.box.sync.tools) loadTools();
+      if (pk.box.sync.memory && state.view === 'memory' && !state.editing) loadNotes();
+    }
+    pk.seenSync = pk.box.lastChange || 0;
     if (pk.open && !$('#panel').hidden) renderPocket();
     renderPocketBadge();
   }
@@ -3817,7 +3944,8 @@
     if (!b.connected) return `<div class="box-line off"><span class="box-dot"></span><span>还没连上末影箱，口袋里的东西只在这台电脑上。</span><button class="btn small primary" data-act="pk-form">连接末影箱</button></div>`;
     const when = b.lastSync ? fmtDate(b.lastSync).slice(5) : '还没同步过';
     const st = b.syncing ? (b.progress || '同步中…') : b.error ? `出错：${b.error}` : `上次同步 ${when}`;
-    return `<div class="box-line${b.error ? ' err' : b.syncing ? ' busy' : ''}"><span class="box-dot"></span><span><b class="box-name">末影箱</b> ${esc(b.repo)} · ${esc(b.device)}<br><small>${esc(st)}</small></span><button class="btn small" data-act="pk-sync" ${b.syncing ? 'disabled' : ''}>同步</button></div>`;
+    const what = ['口袋', b.sync && b.sync.memory ? '记忆区' : '', b.sync && b.sync.tools ? '工具' : ''].filter(Boolean).join('、');
+    return `<div class="box-line${b.error ? ' err' : b.syncing ? ' busy' : ''}"><span class="box-dot"></span><span><b class="box-name">末影箱</b> ${esc(b.repo)} · ${esc(b.device)}<br><small>同步${esc(what)} · ${esc(st)}</small></span><button class="btn small" data-act="pk-sync" ${b.syncing ? 'disabled' : ''}>同步</button></div>`;
   }
 
   const SYNC_LABEL = { synced: ['✓', '已同步'], pending: ['↑', '等着上传'], cloud: ['☁', '在云端，点"拿下来"'], pulling: ['↓', '正在拿下来'] };
@@ -3847,6 +3975,7 @@
         <button class="btn ghost" data-act="pk-trash">回收站</button>
         ${pk.box.connected ? '<button class="btn ghost" data-act="pk-form">末影箱设置</button>' : ''}
       </div>
+      ${pk.box.connected ? '<p class="sub">没装百宝匣的电脑：下载 Releases 里的 Baibaoxia-Box-Web.html，用浏览器打开，贴连接码、输密码就能拿文件。<a href="/box.html" target="_blank" rel="noopener">看看网页版</a></p>' : ''}
       <p class="sub">${pk.box.connected ? '20 MB 以下的文件会自动同步到每台连着同一个末影箱的电脑；更大的文件在别的电脑上显示为"在云端"，要用时点"拿下来"。' : '连上末影箱以后，在学校、公司的电脑上打开百宝匣，连上同一个末影箱就能拿到这些文件。'}</p>`;
   }
 
@@ -3855,6 +3984,14 @@
     const box = $('#panel .panel-inner');
     box.innerHTML = `${panelHead('末影箱')}
       ${b.connected ? `<p class="sub">已连接 <b>${esc(b.repo)}</b>，这台电脑叫"${esc(b.device)}"。</p>
+        <section class="setting">
+          <strong>同步什么</strong>
+          <label class="check"><input type="checkbox" checked disabled> 随身口袋</label>
+          <label class="check"><input type="checkbox" id="box-opt-memory" ${b.sync && b.sync.memory ? 'checked' : ''}> 记忆区：说明、资料、图片、活页</label>
+          <label class="check"><input type="checkbox" id="box-opt-tools" ${b.sync && b.sync.tools ? 'checked' : ''}> 工具和栏目</label>
+          <p class="sub">私密区永远不同步。关掉某一项只是不再同步，这台电脑上和云端的东西都不会删。</p>
+          <div class="btn-row"><button class="btn" data-act="pk-opts">保存</button></div>
+        </section>
         <section class="setting">
           <strong>连接码</strong>
           <p class="sub">把仓库名和令牌用箱子密码加密成一串字。存在手机备忘录里、发给自己都行，别人拿到没有密码也用不了。到了学校的电脑上，贴连接码、输密码就能连上，不用再去 GitHub 翻令牌。</p>
@@ -3876,6 +4013,12 @@
       <label class="field"><span>令牌</span><input id="box-token" type="password" placeholder="github_pat_…" autocomplete="off"></label>`}
       <label class="field"><span>箱子密码</span><input id="box-pw" type="password" autocomplete="new-password" placeholder="至少 6 位"><small>第一次连接时设定；以后每台电脑都用这个密码。忘了就打不开里面的东西，谁也帮不了你，记牢。</small></label>
       <label class="field"><span>这台电脑叫</span><input id="box-device" maxlength="30" placeholder="比如 宿舍电脑、学校机房"></label>
+      <div class="field"><span>同步什么</span>
+        <label class="check"><input type="checkbox" checked disabled> 随身口袋</label>
+        <label class="check"><input type="checkbox" id="box-sync-memory" checked> 记忆区：说明、资料、图片、活页</label>
+        <label class="check"><input type="checkbox" id="box-sync-tools" checked> 工具和栏目（带安装包的工具，在别的电脑上也能装上）</label>
+        <small>私密区永远不同步。资料多的话，第一次上传要一会儿；20 MB 以上的资料在别的电脑上要用时再拿下来。</small>
+      </div>
       <div class="btn-row"><button class="btn primary" data-act="pk-connect">连接</button>${pk.items.length || !pk.temp ? '<button class="btn ghost" data-act="pk-back">先不连</button>' : ''}</div>
       <p class="sub" id="box-msg"></p>
       ${pk.temp ? '<p class="temp-note">临时模式：令牌和密码只在这次打开时用，关掉百宝匣就一起清掉。</p>' : '<p class="sub">令牌和加密钥匙存在这台电脑的百宝匣文件夹里（.末影箱），不会上传。</p>'}`}`;
@@ -3922,7 +4065,7 @@
     if (act === 'pk-connect') {
       const msg = $('#box-msg');
       const v = id => ($(id) ? $(id).value : '');
-      const body = { repo: v('#box-repo'), token: v('#box-token'), code: v('#box-code'), password: v('#box-pw'), device: v('#box-device') || $('#box-device').placeholder };
+      const body = { repo: v('#box-repo'), token: v('#box-token'), code: v('#box-code'), password: v('#box-pw'), device: v('#box-device') || $('#box-device').placeholder, sync: { memory: $('#box-sync-memory').checked, tools: $('#box-sync-tools').checked } };
       b.disabled = true;
       msg.textContent = '正在连接 GitHub…第一次可能要十几秒';
       const r = await api('/api/box/connect', { method: 'POST', json: body });
@@ -3931,6 +4074,12 @@
       toast(r.created ? '末影箱建好了，口袋里的东西会自动传上去' : '连上了，正在把末影箱里的东西拿下来', 4000);
       pk.form = false;
       return refreshPocket();
+    }
+    if (act === 'pk-opts') {
+      const r = await api('/api/box/options', { method: 'POST', json: { sync: { memory: $('#box-opt-memory').checked, tools: $('#box-opt-tools').checked } } });
+      if (r.box) pk.box = r.box;
+      toast(r.ok ? '保存好了，马上同步' : r.message);
+      return;
     }
     if (act === 'pk-mode') { pk.useCode = !!b.dataset.code; return renderPocket(); }
     if (act === 'pk-code') {

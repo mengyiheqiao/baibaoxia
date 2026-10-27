@@ -986,3 +986,13 @@ body.has-mascot .butler-face { display: none; }
 .seg button { border: 0; background: transparent; padding: 6px 14px; font: inherit; color: var(--muted); cursor: pointer; }
 .seg button.on { background: var(--frame); color: #f3f1ea; }
 .code-out { width: 100%; margin-top: 8px; font-family: var(--mono); font-size: 12px; word-break: break-all; box-sizing: border-box; }
+.cloud-row { opacity: .8; } .cloud-row .t { font-style: italic; }
+
+/* ---- 0.16 带走方式 */
+.carry-box { margin: 14px 0 4px; }
+.carry-miss { border: 1px solid var(--quick-edge); background: var(--quick); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+.carry-miss .btn-row { margin-top: 10px; }
+.carry-edit { border-top: 1px solid var(--line); padding-top: 8px; }
+.carry-edit summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.carry-edit .field > div { padding: 4px 0; }
+.carry-warn { color: var(--lamp-err); }

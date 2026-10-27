@@ -94,7 +94,7 @@ function saveDesk(patch) { saveSettings({ '桌面': { ...desk(), ...patch } }); 
 function keys() { return { ...DEFAULT_KEYS, ...(desk()['快捷键'] || {}) }; }
 
 // ---- 第一次打开桌面版：问一下要不要把网页版的数据搬过来
-const DATA_ITEMS = ['tools.json', 'layout.json', 'settings.json', '统计.json', '记忆区', '私密区', '图标', '皮肤', '随身口袋'];
+const DATA_ITEMS = ['tools.json', 'layout.json', 'settings.json', '统计.json', '记忆区', '私密区', '图标', '皮肤', '随身口袋', '工具安装包'];
 
 // 自己拷文件夹（不用 fs.cpSync：新版 Node 在 Windows 上碰到中文名字可能出问题）
 function copyTree(src, dst) {

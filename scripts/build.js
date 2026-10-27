@@ -153,5 +153,7 @@ function buildUpdate() {
   }
   if (what === 'web' || what === 'all') buildWeb();
   if (what === 'update' || what === 'all') buildUpdate();
+  // 末影箱网页版：一个单独的网页文件，在没装百宝匣的电脑上下载下来双击就能打开末影箱
+  if (what === 'all') save('Baibaoxia-Box-Web.html', fs.readFileSync(path.join(SRC, 'public', 'box.html')));
   if (what === 'desktop' || what === 'all') await buildDesktop();
 })().catch(e => { console.error('\n打包失败：' + e.message); process.exit(1); });

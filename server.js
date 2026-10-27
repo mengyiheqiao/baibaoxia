@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.15.0';
+const VERSION = '0.16.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -62,9 +62,13 @@ function readLayout(space = 'main') {
 function writeLayout(sections, space = 'main') {
   const j = readLayoutFile();
   j[LAYOUT_KEY(space)] = sections.map(s => ({ '名字': s.name, '图标': s.icon || '' }));
+  writeLayoutFile(j);
+}
+function writeLayoutFile(j) {
   const tmp = LAYOUT_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(j, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, LAYOUT_FILE);
+  dataChanged();
 }
 
 function cleanSection(name) {
@@ -72,6 +76,21 @@ function cleanSection(name) {
 }
 
 // ---------------------------------------------------------------- 工具配置
+
+// 工具、栏目、活页改过以后通知末影箱（连着的话几秒后同步）
+let dataChanged = () => {};
+
+// 这台电脑上的位置：同一个工具在不同电脑上装在不同地方时，各自记在这里，不跟着末影箱同步
+const LOCAL_POS_FILE = path.join(ROOT, '.末影箱', '本机位置.json');
+const POS_FIELDS = ['文件夹', '程序'];
+function readLocalPos() {
+  try { return JSON.parse(fs.readFileSync(LOCAL_POS_FILE, 'utf8')) || {}; } catch { return {}; }
+}
+function writeLocalPos(m) {
+  fs.mkdirSync(path.dirname(LOCAL_POS_FILE), { recursive: true });
+  fs.writeFileSync(LOCAL_POS_FILE + '.tmp', JSON.stringify(m, null, 2));
+  fs.renameSync(LOCAL_POS_FILE + '.tmp', LOCAL_POS_FILE);
+}
 
 const TYPE_MAP = { '服务': 'service', '网址': 'link', '书签工具': 'bookmarklet', '文件夹': 'folder', '程序': 'program', '内置': 'builtin', '组合': 'combo' };
 
@@ -96,7 +115,10 @@ function readTools() {
   }
   if (!Array.isArray(list)) return { tools: [], error: 'tools.json 最外层应该是方括号 [ ]。' };
   const seen = new Set();
-  const tools = list.map((t, i) => {
+  const pos = readLocalPos();
+  const tools = list.map((t0, i) => {
+    const here = !t0['私密'] && pos[t0['名字']];
+    const t = here ? { ...t0, ...here } : t0;
     let name = String(t['名字'] || `工具${i + 1}`);
     while (seen.has(name)) name += '_';
     seen.add(name);
@@ -120,8 +142,9 @@ function readTools() {
       desc: t['一句话'] || '',
       section: t['栏目'] ? String(t['栏目']) : '',
       feature: t['功能'] || '',
+      localPos: here || null,
       index: i,
-      raw: t,
+      raw: t0,
     };
   });
   return { tools, error: null };
@@ -147,6 +170,7 @@ function writeRawList(list) {
   const tmp = TOOLS_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(list, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, TOOLS_FILE);
+  dataChanged();
 }
 
 // 把表单内容变成 tools.json 里的一项；返回 { raw } 或 { error }
@@ -481,7 +505,7 @@ async function launchService(tool, { forceSetup = false } = {}) {
     return { ok: true, state: 'opened' };
   }
   if (!tool.folder || !fs.existsSync(tool.folder)) {
-    return fail(tool, { message: `找不到文件夹：${tool.folder || '（没有填写）'}。可能是文件夹被移动、改名或删掉了：点抽屉右上角 ⋯ →“修改这个工具”，重新填一下文件夹位置。`, fix: null });
+    return fail(tool, { message: `找不到文件夹：${tool.folder || '（没有填写）'}。可能是文件夹被移动、改名或删掉了，或者这台电脑上没有它：看看下面的"带走方式"，或者点"修改这个工具"重新填一下文件夹位置。`, fix: null, missing: true });
   }
   if (!tool.start) {
     return fail(tool, { message: '没有填写"启动命令"：点抽屉右上角 ⋯ →“修改这个工具”补上。', fix: null });
@@ -560,12 +584,12 @@ async function launch(tool, req) {
       openInSystem(tool.url);
       return { ok: true, state: 'opened' };
     case 'folder':
-      if (!tool.folder || !fs.existsSync(tool.folder)) return { ok: false, message: `找不到文件夹：${tool.folder}` };
+      if (!tool.folder || !fs.existsSync(tool.folder)) return { ok: false, missing: true, message: `这台电脑上找不到文件夹：${tool.folder}` };
       openFolder(tool.folder);
       return { ok: true, state: 'opened' };
     case 'program': {
       const p = tool.program ? path.resolve(ROOT, tool.program) : '';
-      if (!p || !fs.existsSync(p)) return { ok: false, message: `找不到程序：${p || '（没有填写）'}` };
+      if (!p || !fs.existsSync(p)) return { ok: false, missing: true, message: `这台电脑上找不到程序：${p || '（没有填写）'}` };
       openInSystem(p);
       return { ok: true, state: 'opened' };
     }
@@ -850,6 +874,7 @@ function writeBinder(d, b) {
   const tmp = f + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(b, null, 1), 'utf8');
   fs.renameSync(tmp, f);
+  if (d.space === 'main') dataChanged();
 }
 const binderKey = (kind, id) => kind + ':' + id;
 // 网址里的括号也要转义，不然 Markdown 的图片链接会断
@@ -1926,9 +1951,18 @@ const POCKET_TRASH = path.join(POCKET_DIR, '.回收站');
 const BOX_DIR = path.join(ROOT, '.末影箱');
 const BOX_CONF = path.join(BOX_DIR, 'conf.json');
 const TEMP_MODE = process.env.BAIBAO_TEMP === '1';
-const { createBox } = require('./lib/box.js');
+const { createBox, mergeList, mergeMap, hashFile, AUTO_LIMIT } = require('./lib/box.js');
+const KIT_DIR = path.join(ROOT, '工具安装包');
+const MEM_FILES_KEY = 'memory/资料/';
+const SEED_DIR = path.join(CODE, 'defaults', '记忆区');
+const SEED_TOOLS = (() => { try { return JSON.parse(fs.readFileSync(path.join(CODE, 'defaults', 'tools.json'), 'utf8')).map(t => t['名字']); } catch { return []; } })().concat(['截图识字', '截图识字(自带)']);
+const seedHashes = new Map();
+function seedHash(rel) {
+  if (!seedHashes.has(rel)) { let h = null; try { h = hashFile(path.join(SEED_DIR, rel)); } catch {} seedHashes.set(rel, h); }
+  return seedHashes.get(rel);
+}
+const unlinkQuiet = abs => { try { fs.unlinkSync(abs); } catch {} };
 const box = createBox({
-  dir: POCKET_DIR,
   stateDir: BOX_DIR,
   proxy: () => proxySetting(),
   getConf() { try { return JSON.parse(fs.readFileSync(BOX_CONF, 'utf8')); } catch { return null; } },
@@ -1938,11 +1972,168 @@ const box = createBox({
     fs.writeFileSync(BOX_CONF + '.tmp', JSON.stringify(c, null, 2));
     fs.renameSync(BOX_CONF + '.tmp', BOX_CONF);
   },
-  trash(file, name) {
-    if (!fs.existsSync(file)) return;
-    moveToTrash({ trash: POCKET_TRASH }, file, name);
+  // 同步哪些文件夹。私密区永远不同步
+  areas(c) {
+    const sy = c.sync || {};
+    const list = [{
+      key: 'pocket', dir: POCKET_DIR, deep: false, auto: AUTO_LIMIT,
+      trash(abs) { if (fs.existsSync(abs)) moveToTrash({ trash: POCKET_TRASH }, abs, path.basename(abs)); },
+    }];
+    if (sy.memory) list.push({
+      key: 'memory', dir: MEMORY_DIR, deep: true, auto: AUTO_LIMIT,
+      trash(abs) { if (fs.existsSync(abs)) moveToTrash(spaceDirs('main'), abs, path.basename(abs)); },
+      isSeed: (rel, hash) => !rel.includes('/') && seedHash(rel) === hash,
+      changed: () => queueIndex(spaceDirs('main')),
+    });
+    if (sy.tools) {
+      list.push({ key: 'icons', dir: ICON_DIR, deep: false, auto: Infinity, trash: unlinkQuiet });
+      // 工具的安装包：只在要用的时候才下载
+      list.push({ key: 'kit', dir: KIT_DIR, deep: true, auto: 0, trash: unlinkQuiet });
+    }
+    return list;
+  },
+  // 要按条目合并的设置
+  docs(c) {
+    const sy = c.sync || {};
+    const out = [];
+    if (sy.tools) {
+      out.push({
+        key: 'cfg/tools',
+        get() {
+          const { error } = readTools();
+          if (error && fs.existsSync(TOOLS_FILE)) throw new Error('tools.json 有问题，修好以后才能同步工具：' + error);
+          return readRawList().filter(t => !t['私密']);
+        },
+        set(v) {
+          const priv = readRawList().filter(t => t['私密']);
+          writeRawList([...v.filter(t => t && !t['私密']), ...priv]);
+        },
+        merge: (b, l, r) => mergeList(b, l, r, t => t && t['名字']),
+        pristine: () => readRawList().filter(t => !t['私密']).every(t => SEED_TOOLS.includes(t['名字'])),
+      });
+      out.push({
+        key: 'cfg/sections',
+        get: () => readLayoutFile()['栏目'] || [],
+        set(v) { const j = readLayoutFile(); j['栏目'] = v; writeLayoutFile(j); },
+        merge: (b, l, r) => mergeList(b, l, r, x => x && x['名字']),
+        pristine: () => !(readLayoutFile()['栏目'] || []).length,
+      });
+    }
+    if (sy.memory) out.push({
+      key: 'cfg/binder',
+      get: () => readBinder(spaceDirs('main')),
+      set: v => writeBinder(spaceDirs('main'), { pages: v.pages || [], items: v.items || {}, top: v.top || {} }),
+      merge: (b, l, r) => ({
+        pages: mergeList(b && b.pages, l.pages, r.pages, x => x && x.id),
+        items: mergeMap(b && b.items, l.items, r.items),
+        top: mergeMap(b && b.top, l.top, r.top),
+      }),
+      pristine: () => !readBinder(spaceDirs('main')).pages.length,
+    });
+    return out;
   },
 });
+dataChanged = () => box.kick(3000);
+fs.mkdirSync(POCKET_DIR, { recursive: true });
+
+// ---- 带走方式：工具在别的电脑上没有的时候怎么办
+const kitDirOf = name => path.join(KIT_DIR, cleanName(name) || '工具');
+function toolMissing(tool) {
+  if (tool.type === 'folder' || tool.type === 'service') return !tool.folder || !fs.existsSync(tool.folder);
+  if (tool.type === 'program') return !tool.program || !fs.existsSync(path.resolve(ROOT, tool.program));
+  return false;
+}
+function carryInfo(tool) {
+  const c = tool.raw['带走'] || {};
+  const kitName = c['安装包'] || '';
+  let kit = null;
+  if (kitName) {
+    const f = path.join(kitDirOf(tool.name), kitName);
+    const st = safeStat(f);
+    const k = 'kit/' + path.basename(kitDirOf(tool.name)) + '/' + kitName;
+    const cloud = box.cloudOnly(k).find(x => x.key === k);
+    kit = { name: kitName, size: st ? st.size : cloud ? cloud.size : 0, local: !!st, cloud: !!cloud, pulling: !!(cloud && cloud.pulling) };
+  }
+  const b = box.info();
+  return {
+    ok: true,
+    missing: toolMissing(tool),
+    canCarry: ['folder', 'program', 'service'].includes(tool.type),
+    download: c['下载'] || '',
+    kit, localPos: tool.localPos,
+    note: tool.note, source: tool.raw['来源'] || '',
+    box: { connected: b.connected, tools: b.sync.tools },
+  };
+}
+function setCarry(tool, patch) {
+  const list = readRawList();
+  const raw = list[tool.index];
+  const c = { ...(raw['带走'] || {}), ...patch };
+  for (const k of Object.keys(c)) if (!c[k]) delete c[k];
+  if (Object.keys(c).length) raw['带走'] = c; else delete raw['带走'];
+  writeRawList(list);
+}
+function setLocalPos(tool, patch) {
+  const all = readLocalPos();
+  if (patch) all[tool.raw['名字']] = patch; else delete all[tool.raw['名字']];
+  writeLocalPos(all);
+}
+function walkFiles(dir, out = []) {
+  for (const n of fs.readdirSync(dir)) {
+    const p = path.join(dir, n);
+    const st = safeStat(p);
+    if (st && st.isDirectory()) walkFiles(p, out); else if (st) out.push(p);
+  }
+  return out;
+}
+// 用安装包：zip 解压出来并认出程序在哪；安装程序就直接打开
+async function useKit(tool) {
+  const info = carryInfo(tool);
+  if (!info.kit) return { ok: false, message: '这个工具还没有放安装包。' };
+  const file = path.join(kitDirOf(tool.name), info.kit.name);
+  if (!fs.existsSync(file)) {
+    if (!box.connected()) return { ok: false, message: '没连上末影箱，拿不到安装包。' };
+    const k = 'kit/' + path.basename(kitDirOf(tool.name)) + '/' + info.kit.name;
+    if (!box.pull(k)) { await box.sync('kit'); box.pull(k); }
+    await box.sync('kit');
+    if (!fs.existsSync(file)) return { ok: false, message: box.info().error || '安装包没下载下来，再试一次。' };
+  }
+  if (/\.zip$/i.test(file)) {
+    const dest = TEMP_MODE ? path.join(ROOT, '带走的工具', cleanName(tool.name)) : path.join(os.homedir(), '百宝匣工具', cleanName(tool.name));
+    let zip;
+    try { zip = docs.readZip(file); } catch (e) { return { ok: false, message: '安装包解不开：' + e.message }; }
+    fs.mkdirSync(dest, { recursive: true });
+    for (const n of zip.names()) {
+      if (n.endsWith('/')) continue;
+      const t = safeJoin(dest, n.replace(/\\/g, '/'));
+      if (!t) continue;
+      fs.mkdirSync(path.dirname(t), { recursive: true });
+      fs.writeFileSync(t, zip.get(n));
+    }
+    // 压缩包里只有一个文件夹的话，进到里面
+    let root = dest;
+    const top = fs.readdirSync(dest);
+    if (top.length === 1 && safeStat(path.join(dest, top[0])).isDirectory()) root = path.join(dest, top[0]);
+    if (tool.type === 'program') {
+      const want = String(tool.raw['程序'] || '').split(/[\\/]/).pop().toLowerCase();
+      const all = walkFiles(root);
+      const exe = all.find(f => path.basename(f).toLowerCase() === want) || (all.filter(f => /\.exe$/i.test(f)).length === 1 ? all.find(f => /\.exe$/i.test(f)) : null);
+      if (!exe) { openFolder(root); return { ok: true, message: `解压到了 ${root}，没认出要打开哪个程序。找到它以后点"它在这台电脑的别的位置"告诉百宝匣。` }; }
+      setLocalPos(tool, { '程序': exe });
+      openInSystem(exe);
+      return { ok: true, message: `解压到了 ${root}，已经打开。以后在这台电脑上点抽屉就直接打开它。` };
+    }
+    setLocalPos(tool, { '文件夹': root });
+    if (tool.type === 'service') {
+      const r = await launch(findTool(tool.id));
+      return { ...r, message: r.ok ? `解压到了 ${root}，已经启动。` : r.message };
+    }
+    openFolder(root);
+    return { ok: true, message: `解压到了 ${root}。` };
+  }
+  openInSystem(file);
+  return { ok: true, message: '安装程序已经打开了。装好以后，点"它在这台电脑的别的位置"告诉百宝匣装到了哪里。（学校、网吧的电脑可能不让装软件，那就只能用绿色版的 zip 了。）' };
+}
 if (IS_WIN) exec(`attrib +h "${BOX_DIR}"`, { windowsHide: true }, () => {});
 
 function pocketFile(name) {
@@ -2028,9 +2219,85 @@ const server = http.createServer(async (req, res) => {
       if (r.error) return send(res, 200, { ok: false, message: r.error });
       if (list.some((t, i) => i !== tool.index && t['名字'] === r.raw['名字'])) return send(res, 200, { ok: false, message: `已经有一个叫"${r.raw['名字']}"的工具了，换个名字吧。` });
       if (body.createNote && !r.raw['说明书']) r.raw['说明书'] = createToolNote(r.raw);
+      // 这台电脑有自己的位置：改的位置记在这台电脑上，同步出去的还是原来的
+      const posAll = readLocalPos();
+      const here = posAll[tool.raw['名字']];
+      if (here && !r.raw['私密']) {
+        delete posAll[tool.raw['名字']];
+        const keepPos = {};
+        for (const f of POS_FIELDS) if (here[f] !== undefined) {
+          if (r.raw[f]) keepPos[f] = r.raw[f];
+          if (tool.raw[f] !== undefined) r.raw[f] = tool.raw[f]; else delete r.raw[f];
+        }
+        if (Object.keys(keepPos).length) posAll[r.raw['名字']] = keepPos;
+        writeLocalPos(posAll);
+      }
       list[tool.index] = r.raw;
       writeRawList(list);
+      // 改了名字：安装包文件夹跟着改
+      if (r.raw['名字'] !== tool.raw['名字']) {
+        const from = kitDirOf(tool.raw['名字']), to = kitDirOf(r.raw['名字']);
+        if (fs.existsSync(from) && !fs.existsSync(to)) { try { fs.renameSync(from, to); } catch {} }
+      }
       return send(res, 200, { ok: true, id: r.raw['名字'] });
+    }
+    if ((m = /^\/api\/tools\/(.+)\/(carry|kit|kit-remove|kit-use|locate|refetch)$/.exec(p))) {
+      const tool = findTool(m[1]);
+      if (!tool || !canSee(req, tool) || tool.private) return send(res, 404, { ok: false, message: '找不到这个工具，刷新一下页面。' });
+      const act = m[2];
+      if (act === 'carry' && req.method === 'GET') return send(res, 200, carryInfo(tool));
+      if (act === 'carry' && req.method === 'POST') {
+        const body = await readJson(req);
+        let u = String(body.download || '').trim();
+        if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
+        setCarry(tool, { '下载': u });
+        return send(res, 200, { ok: true, ...carryInfo(findTool(tool.id)) });
+      }
+      if (act === 'kit' && req.method === 'POST') {
+        const name = cleanName(url.searchParams.get('name') || '') || '安装包';
+        const buf = await readBody(req, 2 * 1024 * 1024 * 1024);
+        const dir = kitDirOf(tool.name);
+        fs.mkdirSync(dir, { recursive: true });
+        for (const n of fs.readdirSync(dir)) if (n !== name) unlinkQuiet(path.join(dir, n));
+        fs.writeFileSync(path.join(dir, name), buf);
+        setCarry(tool, { '安装包': name });
+        box.kick(1500);
+        return send(res, 200, { ok: true, ...carryInfo(findTool(tool.id)) });
+      }
+      if (act === 'kit-remove' && req.method === 'POST') {
+        const dir = kitDirOf(tool.name);
+        if (fs.existsSync(dir)) for (const n of fs.readdirSync(dir)) unlinkQuiet(path.join(dir, n));
+        setCarry(tool, { '安装包': '' });
+        box.kick(1500);
+        return send(res, 200, { ok: true, ...carryInfo(findTool(tool.id)) });
+      }
+      if (act === 'kit-use' && req.method === 'POST') {
+        if (busy.has(tool.id)) return send(res, 200, { ok: false, message: `正在${busy.get(tool.id)}，请稍等。` });
+        busy.set(tool.id, '准备安装包');
+        try { return send(res, 200, await useKit(tool)); } finally { busy.delete(tool.id); }
+      }
+      if (act === 'locate' && req.method === 'POST') {
+        const body = await readJson(req);
+        if (body.reset) { setLocalPos(tool, null); return send(res, 200, { ok: true }); }
+        const v = path.resolve(String(body.path || '').trim().replace(/^"|"$/g, ''));
+        if (!body.path || !fs.existsSync(v)) return send(res, 200, { ok: false, message: '这个位置不存在。在文件资源管理器里找到它，复制地址栏粘贴过来。' });
+        const isDir = fs.statSync(v).isDirectory();
+        if (tool.type === 'program' && isDir) return send(res, 200, { ok: false, message: '要填程序文件（.exe）的位置，不是文件夹。' });
+        if (tool.type !== 'program' && !isDir) return send(res, 200, { ok: false, message: '要填文件夹的位置。' });
+        setLocalPos(tool, tool.type === 'program' ? { '程序': v } : { '文件夹': v });
+        return send(res, 200, { ok: true });
+      }
+      if (act === 'refetch' && req.method === 'POST') {
+        if (!tool.raw['来源']) return send(res, 200, { ok: false, message: '这个工具不是从 GitHub 收编的。' });
+        const dest = TEMP_MODE ? path.join(ROOT, '带走的工具', cleanName(tool.name)) : path.join(PROJECTS_DIR, cleanName(tool.name));
+        busy.set(tool.id, '从 GitHub 下载');
+        let r;
+        try { r = await githubFetch(tool.raw['来源'], dest); } finally { busy.delete(tool.id); }
+        if (!r.ok) return send(res, 200, r);
+        setLocalPos(tool, { '文件夹': dest });
+        return send(res, 200, { ok: true, message: `下载到了 ${dest}。点"打开"就会启动（第一次可能要先装零件，会慢一点）。` });
+      }
+      return send(res, 405, { ok: false });
     }
     if ((m = /^\/api\/tools\/(.+)\/(launch|stop|fix|log|open-folder|check-update|update)$/.exec(p))) {
       const tool = findTool(m[1]);
@@ -2071,7 +2338,7 @@ const server = http.createServer(async (req, res) => {
       if (space === 'private') return send(res, 404, { error: '找不到' });
     }
     if (p === '/api/pocket' && req.method === 'GET') {
-      return send(res, 200, { items: box.list(), box: box.info(), temp: TEMP_MODE });
+      return send(res, 200, { items: box.list('pocket'), box: box.info(), temp: TEMP_MODE });
     }
     if (p === '/api/pocket/upload' && req.method === 'POST') {
       let name = cleanName(url.searchParams.get('name') || '') || '文件';
@@ -2094,12 +2361,12 @@ const server = http.createServer(async (req, res) => {
       const f = pocketFile(body.name);
       if (!f) return send(res, 400, { ok: false, message: '名字不合法' });
       if (fs.existsSync(f)) { moveToTrash({ trash: POCKET_TRASH }, f, path.basename(f)); box.kick(1500); return send(res, 200, { ok: true }); }
-      if (box.dropRemote(path.basename(f))) return send(res, 200, { ok: true });
+      if (box.dropRemote('pocket/' + path.basename(f))) return send(res, 200, { ok: true });
       return send(res, 200, { ok: false, message: '找不到这个文件了。' });
     }
     if (p === '/api/pocket/pull' && req.method === 'POST') {
       const body = await readJson(req);
-      return send(res, 200, box.pull(String(body.name || '')) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
+      return send(res, 200, box.pull('pocket/' + String(body.name || '')) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
     }
     if (p === '/api/pocket/open' && req.method === 'POST') {
       const body = await readJson(req);
@@ -2142,6 +2409,15 @@ const server = http.createServer(async (req, res) => {
       const r = await box.sync('manual');
       return send(res, 200, { ...r, box: box.info() });
     }
+    if (p === '/api/box/options' && req.method === 'POST') {
+      const body = await readJson(req);
+      if (!box.setOptions(body.sync || {})) return send(res, 200, { ok: false, message: '还没连上末影箱。' });
+      return send(res, 200, { ok: true, box: box.info() });
+    }
+    if (p === '/api/box/pull' && req.method === 'POST') {
+      const body = await readJson(req);
+      return send(res, 200, box.pull(String(body.key || '')) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
+    }
     if (p === '/api/box/disconnect' && req.method === 'POST') {
       box.stop();
       box.disconnect();
@@ -2154,6 +2430,8 @@ const server = http.createServer(async (req, res) => {
         notes: listNotes(d).map(({ text, ...n }) => n),
         files: listFiles(d),
         trash: listTrash(d).length,
+        // 末影箱里有、这台电脑上还没下载的大资料
+        cloud: space === 'main' ? box.cloudOnly(MEM_FILES_KEY).filter(x => !x.key.slice(MEM_FILES_KEY.length).includes('/')).map(x => ({ key: x.key, name: x.key.slice(MEM_FILES_KEY.length), size: x.size, by: x.by, pulling: x.pulling })) : [],
       });
     }
     if ((m = /^\/api\/notes\/(.+)$/.exec(p))) {
