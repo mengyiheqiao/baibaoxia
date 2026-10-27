@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.16.0';
+  const APP_VERSION = '0.17.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -37,7 +37,7 @@
 
   async function api(path, opts = {}) {
     // 在私密区里，所有请求都带上 space=private
-    if (state.space === 'private' && path.startsWith('/api/') && !path.startsWith('/api/private') && !/^\/api\/(pocket|box)\b/.test(path)) {
+    if (state.space === 'private' && path.startsWith('/api/') && !path.startsWith('/api/private') && !/^\/api\/(pocket|box(?!\/private))\b/.test(path)) {
       path += (path.includes('?') ? '&' : '?') + 'space=private';
     }
     const headers = { ...(opts.headers || {}) };
@@ -756,7 +756,7 @@
     if (!b) return;
     if (/^quit/.test(b.dataset.act)) return quitFlow(b.dataset.act);
     if (/^desk-/.test(b.dataset.act)) return deskAct(b.dataset.act, b);
-    if (/^(pw|backup|cfg|pv|skin|bt)-/.test(b.dataset.act)) return settingsAct(b.dataset.act, b);
+    if (/^(pw|backup|cfg|pv|skin|bt|pbox)-/.test(b.dataset.act)) return settingsAct(b.dataset.act, b);
     if (/^ocr-/.test(b.dataset.act)) return ocrAct(b.dataset.act);
     if (/^trash-/.test(b.dataset.act)) return trashAct(b.dataset.act, b);
     if (/^pk-/.test(b.dataset.act)) return pocketAct(b.dataset.act, b);
@@ -953,12 +953,21 @@
     $('#scrim').hidden = false;
     const box = $('#panel .panel-inner');
     box.innerHTML = '<h2 id="panel-title">设置<button class="close" type="button" data-act="close" aria-label="关闭">×</button></h2><p class="sub">读取中…</p>';
-    const [a, st, skinHtml, bt] = await Promise.all([api('/api/autostart'), api('/api/settings'), skinSectionHtml(), api('/api/butler')]);
+    const [a, st, skinHtml, bt, pbox] = await Promise.all([api('/api/autostart'), api('/api/settings'), skinSectionHtml(), api('/api/butler'), state.space === 'private' ? api('/api/box/private') : null]);
     const last = st.lastBackup ? fmtDate(st.lastBackup) : '还没备份过';
     box.innerHTML = `
       <h2 id="panel-title">设置<button class="close" type="button" data-act="close" aria-label="关闭">×</button></h2>
 
       ${skinHtml}
+
+      ${state.space === 'private' && pbox && pbox.connected ? `<section class="setting" id="pbox-setting">
+        <strong>末影箱</strong>
+        <p class="sub">把这边的说明、资料、工具、栏目、皮肤、管家和密码也加密存进末影箱。打开以后，任何连着同一个末影箱的电脑，按 ${keyKbd(privateKey())} 输这边的密码，就能进到同样的私密区。普通区的页面上不会出现任何和这里有关的东西。</p>
+        ${pbox.blocked ? '<p class="sub carry-warn">这台电脑的私密区有自己的密码，和末影箱里的不一样，所以没有同步，也不会动它。</p>' : ''}
+        <label class="check"><input type="checkbox" id="pbox-on" ${pbox.enabled ? 'checked' : ''}> 同步私密区（所有连着末影箱的电脑都会同步）</label>
+        <div class="btn-row"><button class="btn" data-act="pbox-save">保存</button>${pbox.enabled ? '' : '<button class="btn ghost danger" data-act="pbox-purge">从末影箱里删掉这边的东西</button>'}</div>
+        <p class="sub" id="pbox-msg"></p>
+      </section>` : ''}
 
       ${state.space === 'private' ? `<section class="setting">
         <strong>私密区</strong>
@@ -1067,6 +1076,18 @@
   }
 
   async function settingsAct(act, btn) {
+    if (act === 'pbox-save' || act === 'pbox-purge') {
+      const on = act === 'pbox-save' && $('#pbox-on').checked;
+      if (act === 'pbox-purge' && !confirm('从末影箱里删掉这边的所有东西？只删云端的，这台电脑上的不动。其他电脑以后也不再同步这边。')) return;
+      if (on && !confirm('打开以后，所有连着末影箱的电脑都会同步这边（包括临时模式的电脑，关掉时会删干净）。确定吗？')) return;
+      btn.disabled = true;
+      $('#pbox-msg').textContent = '正在同步…';
+      const r = await api('/api/box/private', { method: 'POST', json: act === 'pbox-purge' ? { enable: false, purge: true } : { enable: on } });
+      $('#pbox-msg').textContent = r.ok ? (r.enabled ? (r.blocked ? '已打开，但这台电脑的私密区密码和末影箱里的不一样，没有同步这台电脑。' : '已打开，同步好了。') : act === 'pbox-purge' ? '云端的已经删掉了。' : '已关掉。') : (r.message || '没成功');
+      btn.disabled = false;
+      if (r.ok) { await loadTools(); if (state.view === 'memory') loadNotes(); }
+      return;
+    }
     if (act === 'bt-save') {
       const json = { persona: { 名字: $('#bt-name').value.trim(), 设定: $('#bt-persona').value } };
       if ($('#bt-allow')) json.allowPrivate = $('#bt-allow').checked;
@@ -1935,7 +1956,7 @@
         </span>
       </li>`).join('') : `<li class="none">${state.files.length ? '都放进活页了。' : '还没有资料。'}</li>`;
     // 末影箱里的大资料：要用时再拿下来
-    if (state.space === 'main' && (state.cloudFiles || []).length) $('#file-list').insertAdjacentHTML('beforeend', state.cloudFiles.map(f => `
+    if ((state.cloudFiles || []).length) $('#file-list').insertAdjacentHTML('beforeend', state.cloudFiles.map(f => `
       <li class="file-row cloud-row" title="在末影箱里${f.by ? `，来自${esc(f.by)}` : ''}">
         <span class="t">☁ ${esc(f.name)}</span><span class="s">${fmtSize(f.size)} · ${f.pulling ? '正在拿下来…' : '在末影箱里'}</span>
         <span class="file-acts" style="opacity:1"><button type="button" data-cloud-pull="${esc(f.key)}" ${f.pulling ? 'disabled' : ''}>拿下来</button></span>
@@ -1946,7 +1967,7 @@
     const cp = e.target.closest('[data-cloud-pull]');
     if (cp) {
       cp.disabled = true;
-      const r = await api('/api/box/pull', { method: 'POST', json: { key: cp.dataset.cloudPull } });
+      const r = await api(state.space === 'private' ? '/api/box/private/pull' : '/api/box/pull', { method: 'POST', json: { key: cp.dataset.cloudPull } });
       toast(r.ok ? '正在从末影箱拿下来，好了会出现在资料里' : r.message, 4000);
       if (r.ok) { let n = 0; const t = setInterval(() => { loadNotes(); if (++n > 20 || !(state.cloudFiles || []).some(f => f.key === cp.dataset.cloudPull)) clearInterval(t); }, 3000); }
       return;
@@ -3167,11 +3188,28 @@
     document.title = '百宝匣';
     await loadTools();
     setView('tools');
+    watchPrivateBox();
     toast(`已进入私密区。30 分钟不用会自动锁上，按 ${keyLabel(privateKey())} 立刻离开`, 3500);
+  }
+
+  // 私密区开着的时候，末影箱带来了这边的新东西，就刷新一下
+  function watchPrivateBox() {
+    clearInterval(state.pboxTimer);
+    let seen = null;
+    const tick = async () => {
+      if (state.space !== 'private') { clearInterval(state.pboxTimer); return; }
+      const r = await api('/api/box/private');
+      if (!r || !r.connected || !r.enabled) return;
+      if (seen !== null && r.lastChange !== seen) { loadTools(); if (state.view === 'memory' && !state.editing) loadNotes(); state.butler = null; syncSkin(); }
+      seen = r.lastChange;
+    };
+    tick();
+    state.pboxTimer = setInterval(tick, 30000);
   }
 
   async function leavePrivate(auto) {
     if (state.space !== 'private') return;
+    clearInterval(state.pboxTimer);
     if (state.editing && !auto && !confirmLeave()) return;
     // 看板娘可能还在取这边的皮肤，等它取完再上锁，免得请求被拒
     if (mc.pending) await mc.pending;
@@ -3922,13 +3960,18 @@
     if (!r || !r.items) { if (r && r.message) toast(r.message); return; }
     pk.items = r.items; pk.box = r.box || {}; pk.temp = !!r.temp;
     // 同步过一次（可能从别的电脑带来了工具、说明），刷新一下
-    if (pk.box.lastChange && pk.seenSync !== undefined && pk.box.lastChange !== pk.seenSync && (pk.box.sync.memory || pk.box.sync.tools)) {
-      if (pk.box.sync.tools) loadTools();
-      if (pk.box.sync.memory && state.view === 'memory' && !state.editing) loadNotes();
-    }
+    if (pk.box.lastChange && pk.seenSync !== undefined && pk.box.lastChange !== pk.seenSync) afterBoxChange();
     pk.seenSync = pk.box.lastChange || 0;
     if (pk.open && !$('#panel').hidden) renderPocket();
     renderPocketBadge();
+  }
+
+  // 末影箱从别的电脑带来了东西：刷新工具、说明、皮肤和管家
+  function afterBoxChange() {
+    loadTools();
+    if (state.view === 'memory' && !state.editing) loadNotes();
+    state.butler = null;
+    syncSkin();
   }
 
   function renderPocketBadge() {
@@ -3944,7 +3987,7 @@
     if (!b.connected) return `<div class="box-line off"><span class="box-dot"></span><span>还没连上末影箱，口袋里的东西只在这台电脑上。</span><button class="btn small primary" data-act="pk-form">连接末影箱</button></div>`;
     const when = b.lastSync ? fmtDate(b.lastSync).slice(5) : '还没同步过';
     const st = b.syncing ? (b.progress || '同步中…') : b.error ? `出错：${b.error}` : `上次同步 ${when}`;
-    const what = ['口袋', b.sync && b.sync.memory ? '记忆区' : '', b.sync && b.sync.tools ? '工具' : ''].filter(Boolean).join('、');
+    const what = ['口袋', b.sync && b.sync.memory ? '记忆区' : '', b.sync && b.sync.tools ? '工具' : '', b.sync && b.sync.settings ? '外观和 AI' : ''].filter(Boolean).join('、');
     return `<div class="box-line${b.error ? ' err' : b.syncing ? ' busy' : ''}"><span class="box-dot"></span><span><b class="box-name">末影箱</b> ${esc(b.repo)} · ${esc(b.device)}<br><small>同步${esc(what)} · ${esc(st)}</small></span><button class="btn small" data-act="pk-sync" ${b.syncing ? 'disabled' : ''}>同步</button></div>`;
   }
 
@@ -3989,7 +4032,8 @@
           <label class="check"><input type="checkbox" checked disabled> 随身口袋</label>
           <label class="check"><input type="checkbox" id="box-opt-memory" ${b.sync && b.sync.memory ? 'checked' : ''}> 记忆区：说明、资料、图片、活页</label>
           <label class="check"><input type="checkbox" id="box-opt-tools" ${b.sync && b.sync.tools ? 'checked' : ''}> 工具和栏目</label>
-          <p class="sub">私密区永远不同步。关掉某一项只是不再同步，这台电脑上和云端的东西都不会删。</p>
+          <label class="check"><input type="checkbox" id="box-opt-settings" ${b.sync && b.sync.settings ? 'checked' : ''}> 外观和 AI：皮肤、AI 设置、管家</label>
+          <p class="sub">关掉某一项只是不再同步，这台电脑上和云端的东西都不会删。</p>
           <div class="btn-row"><button class="btn" data-act="pk-opts">保存</button></div>
         </section>
         <section class="setting">
@@ -4017,7 +4061,9 @@
         <label class="check"><input type="checkbox" checked disabled> 随身口袋</label>
         <label class="check"><input type="checkbox" id="box-sync-memory" checked> 记忆区：说明、资料、图片、活页</label>
         <label class="check"><input type="checkbox" id="box-sync-tools" checked> 工具和栏目（带安装包的工具，在别的电脑上也能装上）</label>
-        <small>私密区永远不同步。资料多的话，第一次上传要一会儿；20 MB 以上的资料在别的电脑上要用时再拿下来。</small>
+        <label class="check"><input type="checkbox" id="box-sync-settings" checked> 外观和 AI：皮肤、AI 设置、管家</label>
+        <small>资料多的话，第一次上传要一会儿；20 MB 以上的资料在别的电脑上要用时再拿下来。</small>
+        ${pk.temp ? '' : '<small class="carry-warn">在朋友、同学这种别人在用的电脑上，请用临时模式打开百宝匣再连接，不然这台电脑原来的说明和工具会和你的合在一起。</small>'}
       </div>
       <div class="btn-row"><button class="btn primary" data-act="pk-connect">连接</button>${pk.items.length || !pk.temp ? '<button class="btn ghost" data-act="pk-back">先不连</button>' : ''}</div>
       <p class="sub" id="box-msg"></p>
@@ -4065,7 +4111,7 @@
     if (act === 'pk-connect') {
       const msg = $('#box-msg');
       const v = id => ($(id) ? $(id).value : '');
-      const body = { repo: v('#box-repo'), token: v('#box-token'), code: v('#box-code'), password: v('#box-pw'), device: v('#box-device') || $('#box-device').placeholder, sync: { memory: $('#box-sync-memory').checked, tools: $('#box-sync-tools').checked } };
+      const body = { repo: v('#box-repo'), token: v('#box-token'), code: v('#box-code'), password: v('#box-pw'), device: v('#box-device') || $('#box-device').placeholder, sync: { memory: $('#box-sync-memory').checked, tools: $('#box-sync-tools').checked, settings: $('#box-sync-settings').checked } };
       b.disabled = true;
       msg.textContent = '正在连接 GitHub…第一次可能要十几秒';
       const r = await api('/api/box/connect', { method: 'POST', json: body });
@@ -4076,7 +4122,7 @@
       return refreshPocket();
     }
     if (act === 'pk-opts') {
-      const r = await api('/api/box/options', { method: 'POST', json: { sync: { memory: $('#box-opt-memory').checked, tools: $('#box-opt-tools').checked } } });
+      const r = await api('/api/box/options', { method: 'POST', json: { sync: { memory: $('#box-opt-memory').checked, tools: $('#box-opt-tools').checked, settings: $('#box-opt-settings').checked } } });
       if (r.box) pk.box = r.box;
       toast(r.ok ? '保存好了，马上同步' : r.message);
       return;

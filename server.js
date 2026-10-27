@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.16.0';
+const VERSION = '0.17.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -1067,6 +1067,7 @@ function writeSettings(patch) {
   const tmp = SETTINGS_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(s, null, 2) + '\n', 'utf8');
   fs.renameSync(tmp, SETTINGS_FILE);
+  dataChanged();
   return s;
 }
 
@@ -1972,8 +1973,9 @@ const box = createBox({
     fs.writeFileSync(BOX_CONF + '.tmp', JSON.stringify(c, null, 2));
     fs.renameSync(BOX_CONF + '.tmp', BOX_CONF);
   },
-  // 同步哪些文件夹。私密区永远不同步
-  areas(c) {
+  hidden: k => /^(private|pskins)\//.test(k),
+  // 同步哪些文件夹。私密区只有在私密区设置里打开了才同步（这个开关存在箱子里，所有电脑都照着做）
+  areas(c, x) {
     const sy = c.sync || {};
     const list = [{
       key: 'pocket', dir: POCKET_DIR, deep: false, auto: AUTO_LIMIT,
@@ -1990,12 +1992,70 @@ const box = createBox({
       // 工具的安装包：只在要用的时候才下载
       list.push({ key: 'kit', dir: KIT_DIR, deep: true, auto: 0, trash: unlinkQuiet });
     }
+    if (sy.settings) list.push({ key: 'skins', dir: SKIN_USER, deep: true, auto: Infinity, trash: unlinkQuiet });
+    if (privateSyncOn(x)) {
+      list.push({
+        key: 'private', dir: PRIVATE_DIR, deep: true, auto: AUTO_LIMIT,
+        trash(abs) { if (fs.existsSync(abs)) moveToTrash(spaceDirs('private'), abs, path.basename(abs)); },
+        changed: () => queueIndex(spaceDirs('private')),
+      });
+      list.push({ key: 'pskins', dir: SKIN_PRIVATE, deep: true, auto: Infinity, trash: unlinkQuiet });
+    }
     return list;
   },
   // 要按条目合并的设置
-  docs(c) {
+  docs(c, x) {
     const sy = c.sync || {};
     const out = [];
+    if (sy.settings) out.push({
+      key: 'cfg/settings',
+      get: () => pickKeys(readSettings(), SYNC_SETTINGS),
+      set: v => writeSettings(fillKeys(v, SYNC_SETTINGS)),
+      merge: (b, l, r) => mergeMap(b, l, r),
+      pristine: () => !Object.keys(pickKeys(readSettings(), ['AI', '管家', '皮肤'])).length,
+    });
+    if (privateSyncOn(x)) {
+      out.push({
+        key: 'cfg/psettings',
+        get: () => pickKeys(readSettings(), SYNC_PSETTINGS),
+        set: v => { writeSettings(fillKeys(v, SYNC_PSETTINGS)); if (v['私密密码']) privatePrepared = false; },
+        // 密码：这台电脑第一次同步时以箱子里的为准
+        merge: (b, l, r) => { const m = mergeMap(b, l, r); if (b == null && r['私密密码']) m['私密密码'] = r['私密密码']; return m; },
+        pristine: () => !hasPassword(),
+      });
+      out.push({
+        key: 'cfg/ptools',
+        get() {
+          const { error } = readTools();
+          if (error && fs.existsSync(TOOLS_FILE)) throw new Error('tools.json 有问题，修好以后才能同步工具：' + error);
+          return readRawList().filter(t => t['私密']);
+        },
+        set(v) { writeRawList([...readRawList().filter(t => !t['私密']), ...v.filter(t => t && t['私密'])]); },
+        merge: (b, l, r) => mergeList(b, l, r, t => t && t['名字']),
+        pristine: () => !readRawList().some(t => t['私密']),
+      });
+      out.push({
+        key: 'cfg/psections',
+        get: () => readLayoutFile()['私密栏目'] || [],
+        set(v) { const j = readLayoutFile(); j['私密栏目'] = v; writeLayoutFile(j); },
+        merge: (b, l, r) => mergeList(b, l, r, t => t && t['名字']),
+        pristine: () => !(readLayoutFile()['私密栏目'] || []).length,
+      });
+      out.push({
+        key: 'cfg/pbinder',
+        get: () => readBinder(spaceDirs('private')),
+        set: v => writeBinder(spaceDirs('private'), { pages: v.pages || [], items: v.items || {}, top: v.top || {} }),
+        merge: (b, l, r) => ({ pages: mergeList(b && b.pages, l.pages, r.pages, t => t && t.id), items: mergeMap(b && b.items, l.items, r.items), top: mergeMap(b && b.top, l.top, r.top) }),
+        pristine: () => !readBinder(spaceDirs('private')).pages.length,
+      });
+      out.push({
+        key: 'cfg/pbutler',
+        get() { try { return JSON.parse(fs.readFileSync(butlerFile(), 'utf8')); } catch { return {}; } },
+        set(v) { fs.mkdirSync(PRIVATE_DIR, { recursive: true }); fs.writeFileSync(butlerFile(), JSON.stringify(v, null, 2), 'utf8'); },
+        merge: (b, l, r) => mergeMap(b, l, r),
+        pristine: () => !fs.existsSync(butlerFile()),
+      });
+    }
     if (sy.tools) {
       out.push({
         key: 'cfg/tools',
@@ -2034,6 +2094,23 @@ const box = createBox({
   },
 });
 dataChanged = () => box.kick(3000);
+
+// 外观和 AI：跟着末影箱走的设置（代理、备份位置这些每台电脑不一样的不同步）
+const SYNC_SETTINGS = ['AI', 'AI用代理', 'AI自由回答', '管家', '皮肤'];
+const SYNC_PSETTINGS = ['私密密码', '私密皮肤'];
+function pickKeys(o, keys) { const r = {}; for (const k of keys) if (o[k] !== undefined && o[k] !== null) r[k] = o[k]; return r; }
+function fillKeys(v, keys) { const r = {}; for (const k of keys) r[k] = v[k] === undefined ? null : v[k]; return r; }
+// 私密区要不要同步：箱子里打开了，而且这台电脑的私密区不是别人的（有自己的密码、和箱子里的不一样，就不碰它）
+function privateSyncOn(x) {
+  if (!x || !x.opts || !x.opts.private) return false;
+  if (x.synced || !x.remotePw) return true;
+  const mine = readSettings()['私密密码'];
+  return !mine || !mine.hash || mine.hash === x.remotePw;
+}
+function privateBlocked() {
+  const o = box.boxOpts();
+  return !!o.private && !privateSyncOn({ opts: o, ...box.ctxInfo() });
+}
 fs.mkdirSync(POCKET_DIR, { recursive: true });
 
 // ---- 带走方式：工具在别的电脑上没有的时候怎么办
@@ -2334,8 +2411,27 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ---- 随身口袋 + 末影箱：只在普通区
-    if (p.startsWith('/api/pocket') || p.startsWith('/api/box')) {
+    if ((p.startsWith('/api/pocket') || p.startsWith('/api/box')) && !p.startsWith('/api/box/private')) {
       if (space === 'private') return send(res, 404, { error: '找不到' });
+    }
+    // 私密区设置里的"同步到末影箱"：只在私密区里能看到、能改
+    if (p === '/api/box/private') {
+      if (space !== 'private') return send(res, 404, { error: '找不到' });
+      if (req.method === 'POST') {
+        const body = await readJson(req);
+        if (!box.connected()) return send(res, 200, { ok: false, message: '还没连上末影箱。回普通区，点"口袋"连接。' });
+        if (body.enable === true) box.setBoxOption({ private: true });
+        else if (body.enable === false) box.setBoxOption({ private: false, ...(body.purge ? { purge: ['private/', 'pskins/', 'cfg/p'] } : {}) });
+        const r = await box.sync('private');
+        return send(res, 200, { ok: r.ok !== false, message: r.message, enabled: !!box.boxOpts().private, blocked: privateBlocked() });
+      }
+      return send(res, 200, { connected: box.connected(), enabled: !!box.boxOpts().private, blocked: privateBlocked(), lastChange: box.info().lastChange, syncing: box.info().syncing });
+    }
+    if (p === '/api/box/private/pull' && req.method === 'POST') {
+      if (space !== 'private') return send(res, 404, { error: '找不到' });
+      const body = await readJson(req);
+      const k = String(body.key || '');
+      return send(res, 200, k.startsWith('private/') && box.pull(k) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
     }
     if (p === '/api/pocket' && req.method === 'GET') {
       return send(res, 200, { items: box.list('pocket'), box: box.info(), temp: TEMP_MODE });
@@ -2416,7 +2512,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/box/pull' && req.method === 'POST') {
       const body = await readJson(req);
-      return send(res, 200, box.pull(String(body.key || '')) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
+      const k = String(body.key || '');
+      return send(res, 200, !/^(private|pskins)\//.test(k) && box.pull(k) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
     }
     if (p === '/api/box/disconnect' && req.method === 'POST') {
       box.stop();
@@ -2431,7 +2528,7 @@ const server = http.createServer(async (req, res) => {
         files: listFiles(d),
         trash: listTrash(d).length,
         // 末影箱里有、这台电脑上还没下载的大资料
-        cloud: space === 'main' ? box.cloudOnly(MEM_FILES_KEY).filter(x => !x.key.slice(MEM_FILES_KEY.length).includes('/')).map(x => ({ key: x.key, name: x.key.slice(MEM_FILES_KEY.length), size: x.size, by: x.by, pulling: x.pulling })) : [],
+        cloud: (pre => box.cloudOnly(pre).filter(x => !x.key.slice(pre.length).includes('/')).map(x => ({ key: x.key, name: x.key.slice(pre.length), size: x.size, by: x.by, pulling: x.pulling })))(space === 'main' ? MEM_FILES_KEY : 'private/资料/'),
       });
     }
     if ((m = /^\/api\/notes\/(.+)$/.exec(p))) {
