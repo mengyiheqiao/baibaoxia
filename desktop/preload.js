@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('baibaoDesktop', {
   setKey: (name, acc) => ipcRenderer.invoke('baibao:set-key', name, acc),
   setCloseMode: mode => ipcRenderer.invoke('baibao:set-close-mode', mode),
   openDataDir: () => ipcRenderer.invoke('baibao:open-data-dir'),
+  dragOut: name => ipcRenderer.send('baibao:drag-out', String(name)),
   onCommand: cb => ipcRenderer.on('baibao:cmd', (_e, cmd) => cb(String(cmd))),
 });

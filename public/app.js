@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.14.0';
+  const APP_VERSION = '0.15.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -25,6 +25,9 @@
     updateInfo: {},   // 工具 id -> 检查更新结果
     chat: [],         // AI 管家的对话
   };
+
+  // 随身口袋的状态（见文件后面的"随身口袋"一节）
+  const pk = { open: false, items: [], box: {}, temp: false, form: false, timer: null, trash: false, useCode: false };
 
   // ---------------------------------------------------------------- 通用
 
@@ -553,12 +556,13 @@
     state.form = null;
     state.ocr = null;
     state.panelTool = id;
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     renderPanel(true);
     refreshStatus();
   }
   function closePanel() {
+    leavePocketPanel();
     state.panelTool = null;
     state.form = null;
     state.ocr = null;
@@ -651,6 +655,7 @@
     if (/^(pw|backup|cfg|pv|skin|bt)-/.test(b.dataset.act)) return settingsAct(b.dataset.act, b);
     if (/^ocr-/.test(b.dataset.act)) return ocrAct(b.dataset.act);
     if (/^trash-/.test(b.dataset.act)) return trashAct(b.dataset.act, b);
+    if (/^pk-/.test(b.dataset.act)) return pocketAct(b.dataset.act, b);
     if (b.dataset.act === 'enter-private') { closePanel(); return togglePrivate(); }
     if (b.dataset.act === 'ck-run') return runCheckupUI(false);
     if (b.dataset.act === 'ck-deep') return runCheckupUI(true);
@@ -839,7 +844,7 @@
     state.form = null;
     state.panelTool = null;
     state.ocr = null;
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     const box = $('#panel .panel-inner');
     box.innerHTML = '<h2 id="panel-title">设置<button class="close" type="button" data-act="close" aria-label="关闭">×</button></h2><p class="sub">读取中…</p>';
@@ -1094,7 +1099,7 @@
     state.form = null;
     state.panelTool = null;
     state.ocr = { tool: t, status: 'idle', text: '', message: '' };
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     renderOcr();
     if (start) ocrSnip();
@@ -1395,7 +1400,7 @@
 
   async function openTrash() {
     state.form = null; state.panelTool = null; state.ocr = null;
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     const r = await api('/api/trash');
     const items = r.items || [];
@@ -1484,7 +1489,7 @@
     };
     state.panelTool = null;
     state.ocr = null;
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     renderForm();
     const first = $('#panel input[name=name]');
@@ -2629,12 +2634,16 @@
   let dragDepth = 0;
   const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
   window.addEventListener('dragenter', e => {
-    if (!hasFiles(e)) return;
+    if (!hasFiles(e) || pk.dragOut) return;
     if (dragDepth++ === 0) {
       // 有活页的话，底部冒出一排标签：拖到哪张上就放进哪张
       const pages = state.pages || [];
       const open = openPageId();
-      $('#drop-pages').innerHTML = pages.length ? `<div class="dp-tip">放进哪一张活页？${open ? '不选就放进展开着的那张' : ''}</div><div class="dp-row">${pages.map(p => `<span class="dp-chip${p.id === open ? ' cur' : ''}" data-drop-page="${esc(p.id)}" style="--c:${pageColor(p).c};--k:${pageColor(p).k}">${esc(p.name)}</span>`).join('')}<span class="dp-chip none" data-drop-page="">先不放</span></div>` : '';
+      $('#drop-pages').innerHTML = (pages.length ? `<div class="dp-tip">放进哪一张活页？${open ? '不选就放进展开着的那张' : ''}</div><div class="dp-row">${pages.map(p => `<span class="dp-chip${p.id === open ? ' cur' : ''}" data-drop-page="${esc(p.id)}" style="--c:${pageColor(p).c};--k:${pageColor(p).k}">${esc(p.name)}</span>`).join('')}<span class="dp-chip none" data-drop-page="">先不放</span></div>` : '')
+        + (state.space === 'private' ? '' : `<div class="dp-row"><span class="dp-chip pocket" data-drop-pocket="1">🎒 放进随身口袋${pk.box.connected ? '（同步到末影箱）' : ''}</span></div>`);
+      const pocketOpen = pk.open && !$('#panel').hidden && state.space !== 'private';
+      $('#dz-text').innerHTML = pocketOpen ? '松手就放进随身口袋' : '松手就收进记忆区<br><small>.bbskin 皮肤文件会直接装上</small>';
+      if (pocketOpen) $('#drop-pages').innerHTML = '';
     }
     $('#dropzone').hidden = false;
   });
@@ -2642,7 +2651,7 @@
   window.addEventListener('dragover', e => {
     if (!hasFiles(e)) return;
     e.preventDefault();
-    const chip = e.target.closest && e.target.closest('[data-drop-page]');
+    const chip = e.target.closest && e.target.closest('[data-drop-page],[data-drop-pocket]');
     document.querySelectorAll('.dp-chip.over').forEach(c => c !== chip && c.classList.remove('over'));
     if (chip) chip.classList.add('over');
   });
@@ -2652,7 +2661,9 @@
     dragDepth = 0;
     $('#dropzone').hidden = true;
     let files = [...e.dataTransfer.files];
-    if (!files.length) return;
+    if (!files.length || pk.dragOut) return;
+    // 口袋开着、或者拖到了"放进随身口袋"上：全部放进口袋
+    if (state.space !== 'private' && ((e.target.closest && e.target.closest('[data-drop-pocket]')) || (pk.open && !$('#panel').hidden))) return pocketUpload(files);
     const chip = e.target.closest && e.target.closest('[data-drop-page]');
     const dropPage = chip ? chip.dataset.dropPage : openPageId();
     document.querySelectorAll('#skin-drop.over').forEach(x => x.classList.remove('over'));
@@ -3066,7 +3077,7 @@
 
   function showPanel(html) {
     state.form = null; state.panelTool = null; state.ocr = null;
-    $('#panel').hidden = false;
+    $('#panel').hidden = false; leavePocketPanel();
     $('#scrim').hidden = false;
     $('#panel .panel-inner').innerHTML = html;
   }
@@ -3760,6 +3771,240 @@
 
   // ---------------------------------------------------------------- 启动
 
+  // ---------------------------------------------------------------- 随身口袋 + 末影箱（0.15）
+  // 口袋：随手放文件的地方，拖进来、拖出去；连上末影箱后自动加密同步到自己的 GitHub 私有仓库
+
+  const BOX_DOC = 'https://github.com/mengyiheqiao/baibaoxia/blob/main/docs/%E6%9C%AB%E5%BD%B1%E7%AE%B1.md';
+
+  async function openPocket(opts = {}) {
+    if (state.space === 'private') return;
+    pk.open = true;
+    pk.form = !!opts.form;
+    pk.trash = false;
+    showPanel(`${panelHead('随身口袋')}<p class="sub">读取中…</p>`);
+    pk.open = true;
+    $('#panel').classList.add('pocket-panel');
+    await refreshPocket();
+    clearInterval(pk.timer);
+    // 面板开着时，每 3 秒看一眼同步进度
+    pk.timer = setInterval(() => { if (!pk.open || $('#panel').hidden) { clearInterval(pk.timer); pk.open = false; $('#panel').classList.remove('pocket-panel'); return; } if (!pk.form && !pk.trash) refreshPocket(); }, 3000);
+  }
+
+  function leavePocketPanel() {
+    pk.open = false;
+    clearInterval(pk.timer);
+    $('#panel').classList.remove('pocket-panel');
+  }
+
+  async function refreshPocket() {
+    const r = await api('/api/pocket');
+    if (!r || !r.items) { if (r && r.message) toast(r.message); return; }
+    pk.items = r.items; pk.box = r.box || {}; pk.temp = !!r.temp;
+    if (pk.open && !$('#panel').hidden) renderPocket();
+    renderPocketBadge();
+  }
+
+  function renderPocketBadge() {
+    const b = $('#pocket-btn');
+    if (!b) return;
+    const pending = pk.items.filter(x => x.sync === 'pending').length;
+    b.dataset.state = pk.box.error ? 'error' : pk.box.syncing || pending ? 'busy' : pk.box.connected ? 'ok' : '';
+    b.title = pk.box.error ? '末影箱同步出错：' + pk.box.error : pk.box.connected ? `末影箱：${pk.box.repo}` : '随身口袋';
+  }
+
+  function boxLine() {
+    const b = pk.box;
+    if (!b.connected) return `<div class="box-line off"><span class="box-dot"></span><span>还没连上末影箱，口袋里的东西只在这台电脑上。</span><button class="btn small primary" data-act="pk-form">连接末影箱</button></div>`;
+    const when = b.lastSync ? fmtDate(b.lastSync).slice(5) : '还没同步过';
+    const st = b.syncing ? (b.progress || '同步中…') : b.error ? `出错：${b.error}` : `上次同步 ${when}`;
+    return `<div class="box-line${b.error ? ' err' : b.syncing ? ' busy' : ''}"><span class="box-dot"></span><span><b class="box-name">末影箱</b> ${esc(b.repo)} · ${esc(b.device)}<br><small>${esc(st)}</small></span><button class="btn small" data-act="pk-sync" ${b.syncing ? 'disabled' : ''}>同步</button></div>`;
+  }
+
+  const SYNC_LABEL = { synced: ['✓', '已同步'], pending: ['↑', '等着上传'], cloud: ['☁', '在云端，点"拿下来"'], pulling: ['↓', '正在拿下来'] };
+
+  function renderPocket() {
+    const box = $('#panel .panel-inner');
+    if (pk.form) return renderBoxForm();
+    if (pk.trash) return renderPocketTrash();
+    const items = pk.items;
+    box.innerHTML = `${panelHead('随身口袋')}
+      ${pk.temp ? '<p class="temp-note">临时模式：关掉百宝匣后，这台电脑上的口袋会清空。</p>' : ''}
+      ${boxLine()}
+      <div class="pocket-drop" id="pocket-drop">把文件拖到这里放进口袋<br><small>拿走的时候，把文件从下面拖到桌面或者别的窗口里</small></div>
+      ${items.length ? `<ul class="pocket-list">${items.map(it => {
+        const [g, tip] = SYNC_LABEL[it.sync] || ['', ''];
+        const cloud = it.sync === 'cloud' || it.sync === 'pulling';
+        return `<li class="pk-item${cloud ? ' cloud' : ''}" ${cloud ? '' : 'draggable="true"'} data-name="${esc(it.name)}">
+          <span class="pk-glyph">${fileGlyph(it.name)}</span>
+          <span class="pk-main"><span class="pk-name">${esc(it.name)}</span><small>${fmtSize(it.size)} · ${esc(fmtDate(it.mtime).slice(5))}${it.by && cloud ? ` · 来自${esc(it.by)}` : ''}</small></span>
+          ${g ? `<span class="pk-sync s-${it.sync}" title="${esc(tip)}">${g}</span>` : ''}
+          ${cloud ? `<button class="btn small" data-act="pk-pull" ${it.sync === 'pulling' ? 'disabled' : ''}>拿下来</button>` : `<button class="btn small ghost" data-act="pk-open">打开</button>`}
+          <button class="link-btn danger" data-act="pk-del" aria-label="删除">删除</button>
+        </li>`;
+      }).join('')}</ul>` : '<p class="empty-note">口袋是空的。</p>'}
+      <div class="btn-row panel-foot">
+        <button class="btn ghost" data-act="pk-folder">打开文件夹</button>
+        <button class="btn ghost" data-act="pk-trash">回收站</button>
+        ${pk.box.connected ? '<button class="btn ghost" data-act="pk-form">末影箱设置</button>' : ''}
+      </div>
+      <p class="sub">${pk.box.connected ? '20 MB 以下的文件会自动同步到每台连着同一个末影箱的电脑；更大的文件在别的电脑上显示为"在云端"，要用时点"拿下来"。' : '连上末影箱以后，在学校、公司的电脑上打开百宝匣，连上同一个末影箱就能拿到这些文件。'}</p>`;
+  }
+
+  function renderBoxForm() {
+    const b = pk.box;
+    const box = $('#panel .panel-inner');
+    box.innerHTML = `${panelHead('末影箱')}
+      ${b.connected ? `<p class="sub">已连接 <b>${esc(b.repo)}</b>，这台电脑叫"${esc(b.device)}"。</p>
+        <section class="setting">
+          <strong>连接码</strong>
+          <p class="sub">把仓库名和令牌用箱子密码加密成一串字。存在手机备忘录里、发给自己都行，别人拿到没有密码也用不了。到了学校的电脑上，贴连接码、输密码就能连上，不用再去 GitHub 翻令牌。</p>
+          <span class="with-btn"><input id="box-code-pw" type="password" placeholder="输入箱子密码" autocomplete="off"><button class="btn" data-act="pk-code">生成</button></span>
+          <textarea id="box-code-out" class="code-out" rows="3" readonly hidden></textarea>
+        </section>
+        <div class="btn-row"><button class="btn" data-act="pk-back">← 回到口袋</button><button class="btn ghost danger" data-act="pk-disconnect">断开</button></div>
+        <p class="sub">断开只是让这台电脑不再同步，口袋里的文件和云端的东西都不会删。</p>` : `
+      <p class="sub">末影箱把口袋里的东西加密以后存进<b>你自己的</b> GitHub 私有仓库。在别的电脑上连同一个仓库、输同一个密码，就能拿到。GitHub 上只看得到乱码。</p>
+      <ol class="box-steps">
+        <li>在 GitHub 上<a href="https://github.com/new" target="_blank" rel="noopener">新建一个仓库</a>，选 Private（私有），名字随便，比如 my-box</li>
+        <li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">生成一个令牌</a>：Repository access 选 Only select repositories，勾上刚才的仓库；Permissions 里把 Contents 设成 Read and write</li>
+        <li>把仓库名、令牌填到下面，再设一个箱子密码</li>
+      </ol>
+      <p class="sub"><a href="${BOX_DOC}" target="_blank" rel="noopener">一步一步的详细教程</a></p>
+      <div class="seg" role="tablist"><button type="button" class="${pk.useCode ? '' : 'on'}" data-act="pk-mode" data-code="">仓库 + 令牌</button><button type="button" class="${pk.useCode ? 'on' : ''}" data-act="pk-mode" data-code="1">我有连接码</button></div>
+      ${pk.useCode ? `<label class="field"><span>连接码</span><textarea id="box-code" rows="3" placeholder="BBX1.…" spellcheck="false"></textarea><small>在已经连上末影箱的电脑上：随身口袋 → 末影箱设置 → 生成连接码。</small></label>` : `
+      <label class="field"><span>仓库</span><input id="box-repo" placeholder="你的用户名/my-box" spellcheck="false" autocomplete="off"></label>
+      <label class="field"><span>令牌</span><input id="box-token" type="password" placeholder="github_pat_…" autocomplete="off"></label>`}
+      <label class="field"><span>箱子密码</span><input id="box-pw" type="password" autocomplete="new-password" placeholder="至少 6 位"><small>第一次连接时设定；以后每台电脑都用这个密码。忘了就打不开里面的东西，谁也帮不了你，记牢。</small></label>
+      <label class="field"><span>这台电脑叫</span><input id="box-device" maxlength="30" placeholder="比如 宿舍电脑、学校机房"></label>
+      <div class="btn-row"><button class="btn primary" data-act="pk-connect">连接</button>${pk.items.length || !pk.temp ? '<button class="btn ghost" data-act="pk-back">先不连</button>' : ''}</div>
+      <p class="sub" id="box-msg"></p>
+      ${pk.temp ? '<p class="temp-note">临时模式：令牌和密码只在这次打开时用，关掉百宝匣就一起清掉。</p>' : '<p class="sub">令牌和加密钥匙存在这台电脑的百宝匣文件夹里（.末影箱），不会上传。</p>'}`}`;
+    const dev = $('#box-device');
+    if (dev && !dev.value) api('/api/box').then(r => { if (r && r.hostname && !dev.value) dev.placeholder = r.hostname; });
+  }
+
+  async function renderPocketTrash() {
+    const r = await api('/api/pocket/trash');
+    const items = (r && r.items) || [];
+    $('#panel .panel-inner').innerHTML = `${panelHead('口袋的回收站')}
+      <p class="sub">在口袋里删掉的、被别的电脑上的新版本换掉的文件都在这里。</p>
+      ${items.length ? `<ul class="pocket-list">${items.map(it => `<li class="pk-item" data-name="${esc(it.name)}"><span class="pk-glyph">${fileGlyph(it.name)}</span><span class="pk-main"><span class="pk-name">${esc(it.name)}</span><small>${fmtSize(it.size)} · 删于 ${esc(fmtDate(it.deleted).slice(5))}</small></span><button class="btn small" data-act="pk-restore">放回口袋</button></li>`).join('')}</ul>` : '<p class="empty-note">回收站是空的。</p>'}
+      <div class="btn-row panel-foot"><button class="btn" data-act="pk-back">← 回到口袋</button></div>`;
+  }
+
+  async function pocketAct(act, b) {
+    const li = b.closest('.pk-item');
+    const name = li && li.dataset.name;
+    if (act === 'pk-form') { pk.form = true; pk.trash = false; return renderPocket(); }
+    if (act === 'pk-back') { pk.form = false; pk.trash = false; return refreshPocket(); }
+    if (act === 'pk-trash') { pk.trash = true; return renderPocket(); }
+    if (act === 'pk-folder') return api('/api/pocket/folder', { method: 'POST' });
+    if (act === 'pk-open') { const r = await api('/api/pocket/open', { method: 'POST', json: { name } }); if (!r.ok) toast(r.message); return; }
+    if (act === 'pk-pull') { b.disabled = true; const r = await api('/api/pocket/pull', { method: 'POST', json: { name } }); toast(r.ok ? '正在从末影箱拿下来…' : r.message); return refreshPocket(); }
+    if (act === 'pk-restore') { const r = await api('/api/pocket/restore', { method: 'POST', json: { name } }); toast(r.ok ? '放回口袋了' : r.message); return renderPocket(); }
+    if (act === 'pk-del') {
+      const it = pk.items.find(x => x.name === name);
+      const cloudOnly = it && (it.sync === 'cloud' || it.sync === 'pulling');
+      const msg = cloudOnly ? `从末影箱里删掉"${name}"？所有电脑上都会消失。` : pk.box.connected ? `删掉"${name}"？连着末影箱的其他电脑上也会删掉（都会先放进回收站）。` : `删掉"${name}"？会先放进口袋的回收站。`;
+      if (!confirm(msg)) return;
+      const r = await api('/api/pocket/delete', { method: 'POST', json: { name } });
+      if (!r.ok) toast(r.message);
+      return refreshPocket();
+    }
+    if (act === 'pk-sync') {
+      b.disabled = true;
+      pk.box.syncing = true; renderPocket();
+      const r = await api('/api/box/sync', { method: 'POST' });
+      if (r.box) pk.box = r.box;
+      toast(r.ok ? (r.changed ? `同步好了：上传 ${r.uploaded || 0} 个，拿下来 ${r.downloaded || 0} 个` : '已经是最新的了') : (r.message || '同步失败'), 4000);
+      return refreshPocket();
+    }
+    if (act === 'pk-connect') {
+      const msg = $('#box-msg');
+      const v = id => ($(id) ? $(id).value : '');
+      const body = { repo: v('#box-repo'), token: v('#box-token'), code: v('#box-code'), password: v('#box-pw'), device: v('#box-device') || $('#box-device').placeholder };
+      b.disabled = true;
+      msg.textContent = '正在连接 GitHub…第一次可能要十几秒';
+      const r = await api('/api/box/connect', { method: 'POST', json: body });
+      b.disabled = false;
+      if (!r.ok) { msg.textContent = r.message || '没连上'; return; }
+      toast(r.created ? '末影箱建好了，口袋里的东西会自动传上去' : '连上了，正在把末影箱里的东西拿下来', 4000);
+      pk.form = false;
+      return refreshPocket();
+    }
+    if (act === 'pk-mode') { pk.useCode = !!b.dataset.code; return renderPocket(); }
+    if (act === 'pk-code') {
+      const r = await api('/api/box/code', { method: 'POST', json: { password: $('#box-code-pw').value } });
+      if (!r.ok) return toast(r.message);
+      const out = $('#box-code-out');
+      out.hidden = false; out.value = r.code; out.select();
+      try { await navigator.clipboard.writeText(r.code); toast('连接码已经复制好了'); } catch {}
+      return;
+    }
+    if (act === 'pk-disconnect') {
+      if (!confirm('断开末影箱？这台电脑以后不再同步，文件都不会删。')) return;
+      await api('/api/box/disconnect', { method: 'POST' });
+      pk.form = false;
+      return refreshPocket();
+    }
+  }
+
+  async function pocketUpload(files) {
+    let ok = 0;
+    for (const f of files) {
+      toast(`正在放进口袋：${f.name}…`, 60000);
+      const r = await api(`/api/pocket/upload?name=${encodeURIComponent(f.name)}`, { method: 'POST', body: f, headers: { 'Content-Type': 'application/octet-stream' } });
+      if (r.ok) ok++; else toast(`${f.name} 没放进去：${r.message || ''}`, 4000);
+    }
+    if (ok) toast(`放进口袋了 ${ok} 个文件${pk.box.connected ? '，马上同步到末影箱' : ''}`);
+    if (pk.open && !$('#panel').hidden) refreshPocket(); else { await refreshPocket(); openPocket(); }
+  }
+
+  // 从口袋里拖出去：桌面版交给系统拖放（真正的文件）；网页版用 Chrome 的 DownloadURL
+  $('#panel').addEventListener('dragstart', e => {
+    const li = e.target.closest && e.target.closest('.pk-item[draggable]');
+    if (!li) return;
+    const name = li.dataset.name;
+    pk.dragOut = true;
+    setTimeout(() => { pk.dragOut = false; }, 10000);
+    if (window.baibaoDesktop && window.baibaoDesktop.dragOut) {
+      e.preventDefault();
+      window.baibaoDesktop.dragOut(name);
+      setTimeout(() => { pk.dragOut = false; }, 500);
+      return;
+    }
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('DownloadURL', `application/octet-stream:${name}:${location.origin}/口袋/${encodeURIComponent(name)}`);
+    e.dataTransfer.setData('text/uri-list', `${location.origin}/口袋/${encodeURIComponent(name)}`);
+  });
+  $('#panel').addEventListener('dragend', () => { pk.dragOut = false; });
+  $('#panel').addEventListener('dblclick', e => {
+    const li = e.target.closest && e.target.closest('.pk-item[draggable]');
+    if (li) api('/api/pocket/open', { method: 'POST', json: { name: li.dataset.name } });
+  });
+
+  $('#pocket-btn').addEventListener('click', () => { $('#q').value = ''; openPocket(); });
+
+  // 临时模式：顶上挂一条提示，没连末影箱就直接打开连接页面
+  async function initPocket() {
+    if (state.space === 'private') return;
+    await refreshPocket();
+    if (pk.temp) {
+      document.body.classList.add('temp-mode');
+      if (!$('#temp-banner')) {
+        const b = document.createElement('div');
+        b.id = 'temp-banner';
+        b.className = 'banner top temp-banner main-only';
+        b.innerHTML = '临时模式：这是别人的电脑，关掉百宝匣后不会留下你的任何东西。<button class="link-btn" type="button">打开随身口袋</button>';
+        b.querySelector('button').addEventListener('click', () => openPocket());
+        $('main').prepend(b);
+      }
+      if (!pk.box.connected) openPocket({ form: true });
+    }
+    // 没开面板时也每分钟看一眼，让按钮上的小点保持最新
+    setInterval(() => { if (state.space !== 'private' && !(pk.open && !$('#panel').hidden)) refreshPocket(); }, 60000);
+  }
+
   function route() {
     let h = location.hash.slice(1);
     try { h = decodeURIComponent(h); } catch {}
@@ -3789,5 +4034,6 @@
     }
     await loadTools();
     route();
+    initPocket();
   })();
 })();

@@ -944,3 +944,45 @@ body:has(#panel:not([hidden]) #chat-log) #mascot .mc-bubble { display: none; }
 body.has-mascot .butler-face { display: none; }
 @media (max-width: 1099px) { #mascot { display: none !important; } }
 @media (prefers-reduced-motion: reduce) { #mascot .mc-body { animation: none !important; } #mascot .mc-img { transition: none; } }
+
+/* ---- 0.15 随身口袋 + 末影箱 */
+.btn.pocket { position: relative; }
+.btn.pocket[data-state]:not([data-state=""])::after { content: ""; position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--lamp-on); }
+.btn.pocket[data-state="busy"]::after { background: var(--brass); animation: pk-blink 1s infinite; }
+.btn.pocket[data-state="error"]::after { background: var(--lamp-err); }
+@keyframes pk-blink { 50% { opacity: .3; } }
+.box-line { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); margin: 4px 0 12px; }
+.box-line > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.box-line small { color: var(--muted); }
+.box-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--lamp-on); box-shadow: 0 0 0 3px color-mix(in srgb, var(--lamp-on) 25%, transparent); }
+.box-line.off .box-dot { background: var(--line); box-shadow: none; }
+.box-line.busy .box-dot { background: var(--brass); animation: pk-blink 1s infinite; }
+.box-line.err .box-dot { background: var(--lamp-err); }
+.box-name { font-weight: 600; }
+.pocket-drop { border: 2px dashed var(--line); border-radius: 12px; padding: 16px; text-align: center; color: var(--muted); margin-bottom: 12px; }
+.pocket-drop small { opacity: .85; }
+.pocket-list { list-style: none; margin: 0; padding: 0; }
+.pk-item { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.pk-item[draggable="true"] { cursor: grab; }
+.pk-item[draggable="true"]:hover { background: color-mix(in srgb, var(--brass) 8%, transparent); }
+.pk-item.cloud { opacity: .8; }
+.pk-item.cloud .pk-name { font-style: italic; }
+.pk-glyph { flex: none; width: 24px; text-align: center; }
+.pk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk-main small { color: var(--muted); }
+.pk-sync { flex: none; width: 22px; text-align: center; font-weight: 700; }
+.pk-sync.s-synced { color: var(--lamp-on); }
+.pk-sync.s-pending, .pk-sync.s-pulling { color: var(--brass); }
+.pk-sync.s-cloud { color: var(--focus); }
+.link-btn.danger { color: var(--lamp-err); }
+.box-steps { margin: 0 0 8px; padding-left: 20px; line-height: 1.7; }
+.box-steps a, .pocket-panel .sub a { color: var(--focus); }
+.temp-note { background: var(--quick); border: 1px solid var(--quick-edge); border-radius: 8px; padding: 8px 10px; font-size: .92em; }
+.temp-banner { display: flex; gap: 12px; align-items: center; justify-content: center; }
+.dp-chip.pocket { --c: var(--surface); --k: var(--brass); border-radius: 12px; }
+.banner.temp-banner { background: var(--quick); color: var(--ink); border-color: var(--quick-edge); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 6px 0 10px; }
+.seg button { border: 0; background: transparent; padding: 6px 14px; font: inherit; color: var(--muted); cursor: pointer; }
+.seg button.on { background: var(--frame); color: #f3f1ea; }
+.code-out { width: 100%; margin-top: 8px; font-family: var(--mono); font-size: 12px; word-break: break-all; box-sizing: border-box; }

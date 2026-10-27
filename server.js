@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.14.0';
+const VERSION = '0.15.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -1146,6 +1146,7 @@ function runBackup() {
       if (fs.existsSync(path.join(ROOT, f))) copyNewer(path.join(ROOT, f), path.join(dest, f), stats);
     }
     copyNewer(MEMORY_DIR, path.join(dest, '记忆区'), stats);
+    if (fs.existsSync(POCKET_DIR)) copyNewer(POCKET_DIR, path.join(dest, '随身口袋'), stats);
     if (fs.existsSync(PRIVATE_DIR)) {
       const pd = path.join(dest, '私密区');
       copyNewer(PRIVATE_DIR, pd, stats);
@@ -1918,6 +1919,39 @@ function uniqueName(dir, name) {
   return n;
 }
 
+// ---------------------------------------------------------------- 随身口袋 + 末影箱（0.15）
+// 随身口袋：一个放随手文件的地方；连上末影箱以后，里面的东西加密存进自己的 GitHub 私有仓库，换台电脑也能拿到
+const POCKET_DIR = path.join(ROOT, '随身口袋');
+const POCKET_TRASH = path.join(POCKET_DIR, '.回收站');
+const BOX_DIR = path.join(ROOT, '.末影箱');
+const BOX_CONF = path.join(BOX_DIR, 'conf.json');
+const TEMP_MODE = process.env.BAIBAO_TEMP === '1';
+const { createBox } = require('./lib/box.js');
+const box = createBox({
+  dir: POCKET_DIR,
+  stateDir: BOX_DIR,
+  proxy: () => proxySetting(),
+  getConf() { try { return JSON.parse(fs.readFileSync(BOX_CONF, 'utf8')); } catch { return null; } },
+  setConf(c) {
+    if (!c) { try { fs.unlinkSync(BOX_CONF); } catch {} return; }
+    fs.mkdirSync(BOX_DIR, { recursive: true });
+    fs.writeFileSync(BOX_CONF + '.tmp', JSON.stringify(c, null, 2));
+    fs.renameSync(BOX_CONF + '.tmp', BOX_CONF);
+  },
+  trash(file, name) {
+    if (!fs.existsSync(file)) return;
+    moveToTrash({ trash: POCKET_TRASH }, file, name);
+  },
+});
+if (IS_WIN) exec(`attrib +h "${BOX_DIR}"`, { windowsHide: true }, () => {});
+
+function pocketFile(name) {
+  const n = String(name || '');
+  const f = safeJoin(POCKET_DIR, n);
+  if (!f || path.dirname(f) !== POCKET_DIR || n.startsWith('.')) return null;
+  return f;
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     // 只接受本机访问
@@ -2032,6 +2066,87 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // ---- 随身口袋 + 末影箱：只在普通区
+    if (p.startsWith('/api/pocket') || p.startsWith('/api/box')) {
+      if (space === 'private') return send(res, 404, { error: '找不到' });
+    }
+    if (p === '/api/pocket' && req.method === 'GET') {
+      return send(res, 200, { items: box.list(), box: box.info(), temp: TEMP_MODE });
+    }
+    if (p === '/api/pocket/upload' && req.method === 'POST') {
+      let name = cleanName(url.searchParams.get('name') || '') || '文件';
+      if (name.startsWith('~$')) name = name.slice(2) || '文件';
+      const buf = await readBody(req, 2 * 1024 * 1024 * 1024);
+      const target = pocketFile(name);
+      if (!target) return send(res, 400, { ok: false, message: '名字不合法' });
+      // 同名文件：内容一样就不重复放；不一样就换成新的，旧的进回收站
+      if (fs.existsSync(target)) {
+        const same = fs.statSync(target).size === buf.length && fs.readFileSync(target).equals(buf);
+        if (same) return send(res, 200, { ok: true, name, same: true });
+        moveToTrash({ trash: POCKET_TRASH }, target, name);
+      }
+      fs.writeFileSync(target, buf);
+      box.kick(1500);
+      return send(res, 200, { ok: true, name });
+    }
+    if (p === '/api/pocket/delete' && req.method === 'POST') {
+      const body = await readJson(req);
+      const f = pocketFile(body.name);
+      if (!f) return send(res, 400, { ok: false, message: '名字不合法' });
+      if (fs.existsSync(f)) { moveToTrash({ trash: POCKET_TRASH }, f, path.basename(f)); box.kick(1500); return send(res, 200, { ok: true }); }
+      if (box.dropRemote(path.basename(f))) return send(res, 200, { ok: true });
+      return send(res, 200, { ok: false, message: '找不到这个文件了。' });
+    }
+    if (p === '/api/pocket/pull' && req.method === 'POST') {
+      const body = await readJson(req);
+      return send(res, 200, box.pull(String(body.name || '')) ? { ok: true } : { ok: false, message: '云端没有这个文件了。' });
+    }
+    if (p === '/api/pocket/open' && req.method === 'POST') {
+      const body = await readJson(req);
+      const f = pocketFile(body.name);
+      if (!f || !fs.existsSync(f)) return send(res, 200, { ok: false, message: '找不到这个文件。' });
+      openInSystem(f);
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/pocket/folder' && req.method === 'POST') {
+      fs.mkdirSync(POCKET_DIR, { recursive: true });
+      openFolder(POCKET_DIR);
+      return send(res, 200, { ok: true });
+    }
+    if (p === '/api/pocket/trash' && req.method === 'GET') {
+      return send(res, 200, { items: listTrash({ trash: POCKET_TRASH }) });
+    }
+    if (p === '/api/pocket/restore' && req.method === 'POST') {
+      const body = await readJson(req);
+      const src = safeJoin(POCKET_TRASH, String(body.name || ''));
+      if (!src || path.dirname(src) !== POCKET_TRASH || !fs.existsSync(src)) return send(res, 200, { ok: false, message: '回收站里找不到它了。' });
+      const name = uniqueName(POCKET_DIR, path.basename(src));
+      fs.renameSync(src, path.join(POCKET_DIR, name));
+      box.kick(1500);
+      return send(res, 200, { ok: true, name });
+    }
+    if (p === '/api/box' && req.method === 'GET') {
+      return send(res, 200, { ...box.info(), temp: TEMP_MODE, hostname: os.hostname() });
+    }
+    if (p === '/api/box/connect' && req.method === 'POST') {
+      const body = await readJson(req);
+      const r = await box.connect(body);
+      if (r.ok) { box.start(); r.box = box.info(); }
+      return send(res, 200, r);
+    }
+    if (p === '/api/box/code' && req.method === 'POST') {
+      const body = await readJson(req);
+      return send(res, 200, box.makeCode(String(body.password || '')));
+    }
+    if (p === '/api/box/sync' && req.method === 'POST') {
+      const r = await box.sync('manual');
+      return send(res, 200, { ...r, box: box.info() });
+    }
+    if (p === '/api/box/disconnect' && req.method === 'POST') {
+      box.stop();
+      box.disconnect();
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/notes' && req.method === 'GET') {
       const d = spaceDirs(space);
       queueIndex(d);
@@ -2824,6 +2939,11 @@ const server = http.createServer(async (req, res) => {
       if (path.dirname(f) === FILES_DIR && !/^bytes=(?!0-)/.test(req.headers.range || '')) recordFileOpen(path.basename(f));
       return sendFile(res, f, req);
     }
+    if (p.startsWith('/口袋/') && req.method === 'GET') {
+      const f = pocketFile(p.slice('/口袋/'.length));
+      if (!f) return send(res, 403, { error: 'forbidden' });
+      return sendFile(res, f, req);
+    }
     if (p.startsWith('/私密区/')) {
       if (!privateOk(req)) return send(res, 403, { error: '私密区已上锁' });
       const f = safeJoin(PRIVATE_DIR, p.slice('/私密区/'.length));
@@ -2952,6 +3072,7 @@ server.listen(PORT, HOST, () => {
   addBuiltins();
   scheduleBackups();
   queueIndex(spaceDirs('main'));
+  box.start();
   const { tools, error } = readTools();
   console.log('');
   console.log('  百宝匣已启动');
@@ -2975,6 +3096,11 @@ let exiting = false;
 async function shutdown(stopTools = true) {
   if (exiting) return;
   exiting = true;
+  // 末影箱还有没传上去的，退出前最多再等 20 秒
+  if (box.connected()) {
+    box.stop();
+    await Promise.race([box.sync('exit').catch(() => {}), new Promise(r => setTimeout(r, 20000))]);
+  }
   if (stopTools) await Promise.all([...procs.values()].map(e => killTree(e.child.pid)));
   else for (const e of procs.values()) { try { e.child.unref(); } catch {} }
   console.log(stopTools ? '百宝匣已关闭。' : '百宝匣已关闭，工具还在继续运行。');
@@ -2986,4 +3112,4 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 }
 
 // 桌面版要用到的几样东西
-module.exports = { VERSION, PORT, HOST, ROOT, readSettings, writeSettings, shutdown };
+module.exports = { VERSION, PORT, HOST, ROOT, TEMP_MODE, readSettings, writeSettings, shutdown };

@@ -4,7 +4,7 @@
 
 **一键打开常用工具 + 一个只属于自己的说明和资料库**
 
-所有东西都存在你自己的电脑里，不用注册，不用联网。
+所有东西都存在你自己的电脑里，不用注册，不用联网。想在别的电脑上也拿到，可以用自己的 GitHub 私有仓库加密同步。
 
 [下载](https://github.com/mengyiheqiao/baibaoxia/releases/latest) · [使用手册](docs/使用手册.md) · [做皮肤](皮肤示例/皮肤制作说明.md) · [English](#english)
 
@@ -37,6 +37,13 @@
 - 电子书阅读器：划线、笔记、书签，能导出成读书笔记
 - **网页剪藏**：装上浏览器插件，选中文字点一下就存进来
 - 回收站、自动备份（可以备份到 OneDrive 之类的同步文件夹）
+
+**随身口袋 + 末影箱**
+- 随身口袋：文件拖进去、拖出来，像个放随手东西的兜
+- **末影箱**：口袋里的东西加密后存进你自己的 GitHub 私有仓库。在学校机房、公司的电脑上打开百宝匣，连上同一个末影箱就能拿到；在那边放进去的，回家也会出现
+- **临时模式**：在别人的电脑上用，关掉百宝匣就删干净，不留令牌、密码和文件
+- 连接码：把仓库和令牌加密成一串字存在手机里，到哪台电脑都是贴一下、输个密码
+- 教程见 [docs/末影箱.md](docs/末影箱.md)
 
 **其他**
 - **AI 管家**：接上 DeepSeek、通义千问等 AI，她会自己翻你的资料回答并标出处；还能听吩咐做事，比如"帮我看看昨天存的资料讲了什么""打开记账本""把这些放进学习活页"；名字和性格可以自己定
@@ -101,6 +108,7 @@
 - 工具、说明、资料、设置全都存在你自己的电脑上，百宝匣没有服务器，也不收集任何信息
 - 百宝匣只在本机（127.0.0.1）上运行，局域网里的其他电脑访问不到
 - 只有这些情况会联网：你点开网址类工具；从 GitHub 下载或更新项目；剪藏网页图片；以及你自己填了 AI 设置后用"问问"、"AI 提炼"。用 AI 时，相关内容会发给你选的那家 AI 服务
+- 连上末影箱以后，随身口袋里的文件会加密后上传到你自己的 GitHub 私有仓库；加密在你电脑上完成，密码不会离开你的电脑
 
 ## 自己动手改
 
@@ -152,7 +160,7 @@ npm run build          # 打包到 dist/：网页版、桌面版、小更新包
 **百宝匣 (Baibaoxia, "treasure box")** is a local-first personal toolbox and knowledge base for Windows (the web version also runs on macOS and Linux).
 
 - **Tools**: one-click launchers for websites, folders, programs and local projects. It can start a local server, wait until it is ready, then open it. Also supports multi-step "combos", importing projects from GitHub and health checks.
-- **Memory**: Markdown notes, PDFs, EPUBs and Word / Excel / PPT files, all full-text searchable and organized with colored binder tabs. Includes a web-clipper browser extension, an EPUB reader with highlights, optional AI Q&A over your own notes, skins and a desktop app built on Electron.
+- **Memory**: Markdown notes, PDFs, EPUBs and Word / Excel / PPT files, all full-text searchable and organized with colored binder tabs. A "pocket" for quick files can sync end-to-end encrypted through your own private GitHub repo, with a temporary mode for public computers. Includes a web-clipper browser extension, an EPUB reader with highlights, optional AI Q&A over your own notes, skins and a desktop app built on Electron.
 
 Everything stays on your computer, and the server listens only on 127.0.0.1. The UI is in Chinese.
 
