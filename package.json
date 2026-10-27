@@ -1,7 +1,7 @@
 {
   "name": "baibaoxia",
   "productName": "百宝匣",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "百宝匣：一键打开常用工具 + 自己的说明和资料库，全部存在本机",
   "main": "desktop/main.js",
   "private": true,

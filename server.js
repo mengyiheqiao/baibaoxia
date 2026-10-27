@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.17.0';
+const VERSION = '0.18.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -1871,7 +1871,7 @@ function writeBookNotes(d, name, data) {
 // ---------------------------------------------------------------- HTTP
 
 const MIME = {
-  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
   '.md': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.epub': 'application/epub+zip',
@@ -3305,6 +3305,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (p.startsWith('/图标/') && req.method === 'GET') {
       const f = safeJoin(ICON_DIR, p.slice('/图标/'.length));
+      if (!f) return send(res, 403, { error: 'forbidden' });
+      return sendFile(res, f, req);
+    }
+    // 页面上把 PDF 转成说明时要用 PDF.js
+    if (p.startsWith('/pdfjs/') && req.method === 'GET') {
+      const f = safeJoin(path.join(CODE, 'lib', 'pdfjs'), p.slice('/pdfjs/'.length));
       if (!f) return send(res, 403, { error: 'forbidden' });
       return sendFile(res, f, req);
     }

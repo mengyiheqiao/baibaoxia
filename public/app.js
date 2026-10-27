@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.17.0';
+  const APP_VERSION = '0.18.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1950,6 +1950,7 @@
           <span class="t">${fileGlyph(f.name)} ${esc(f.name)}</span><span class="s">${fmtSize(f.size)}${f.indexed === 'pending' ? ' · 正在读取文字' : f.indexed === 'failed' ? ' · 读不出文字' : ''}</span>
         </a>
         <span class="file-acts">
+          ${/\.pdf$/i.test(f.name) ? `<button type="button" data-file-act="tonote" title="把文字和图片转成一篇可以修改的说明">转成说明</button>` : ''}
           ${state.space === 'main' && f.indexed === 'done' ? `<button type="button" data-file-act="ai" title="让 AI 把它提炼成一张速查卡">AI 提炼</button>` : ''}
           <button type="button" data-file-act="rename" aria-label="给 ${esc(f.name)} 改名">改名</button>
           <button type="button" data-file-act="delete" class="danger" aria-label="删除 ${esc(f.name)}">删除</button>
@@ -1980,6 +1981,7 @@
     const name = b.closest('[data-file]').dataset.file;
     const enc = encodeURIComponent(name);
     if (b.dataset.fileAct === 'ai') return aiSummarize('file', name, 'cheatsheet');
+    if (b.dataset.fileAct === 'tonote') return pdfToNote(name, b);
     if (b.dataset.fileAct === 'delete') {
       if (!confirm(`删除"${name}"？它会被移到记忆区文件夹里的 .回收站，需要时还能找回来。`)) return;
       const r = await api(`/api/files/${enc}`, { method: 'DELETE' });
@@ -2595,6 +2597,170 @@
       openNote(r.id);
     }
   });
+
+  // ---------------------------------------------------------------- PDF 转成说明（0.18）
+  // 在页面里用 PDF.js 读：文字按行、段落、标题整理成 Markdown，图片从页面上裁下来存进"图片"，插在原来的位置。
+  // 扫描版（整页都是图片、没有文字）的页面，整页存成一张图。
+  let pdfjsLib = null;
+  async function loadPdfjs() {
+    if (!pdfjsLib) {
+      pdfjsLib = await import('/pdfjs/pdf.min.mjs');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.mjs';
+    }
+    return pdfjsLib;
+  }
+
+  const isCJK = ch => /[\u2e80-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch || '');
+  function joinText(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const x = a.slice(-1), y = b[0];
+    if (isCJK(x) || isCJK(y) || x === ' ' || y === ' ') return a + b;
+    if (x === '-' && /[a-z]/i.test(y)) return a.slice(0, -1) + b; // 英文断词
+    return a + ' ' + b;
+  }
+
+  // 一页的文字：先按 y 分行，再按行距分段，字号明显大的短行当标题
+  function pageBlocks(items) {
+    const lines = [];
+    for (const it of items) {
+      if (typeof it.str !== 'string' || !it.transform) continue;
+      const size = Math.hypot(it.transform[2], it.transform[3]) || it.height || 10;
+      const x = it.transform[4], y = it.transform[5];
+      const last = lines[lines.length - 1];
+      if (last && Math.abs(last.y - y) < size * 0.55) {
+        const gap = x - last.xEnd;
+        last.text += (gap > size * 0.25 && !isCJK(last.text.slice(-1)) && !isCJK(it.str[0]) && !/\s$/.test(last.text) ? ' ' : '') + it.str;
+        last.xEnd = x + (it.width || 0);
+        last.size = Math.max(last.size, size);
+      } else if (it.str.trim() || last) {
+        if (!it.str.trim() && !last) continue;
+        lines.push({ y, x, xEnd: x + (it.width || 0), size, text: it.str });
+      }
+    }
+    const real = lines.filter(l => l.text.trim());
+    if (!real.length) return [];
+    const sizes = real.map(l => l.size).sort((a, b) => a - b);
+    const body = sizes[Math.floor(sizes.length / 2)];
+    const widths = real.map(l => l.xEnd - l.x).sort((a, b) => a - b);
+    const fullW = widths[Math.floor(widths.length * 0.8)] || 0;
+    const blocks = [];
+    let cur = null;
+    for (let i = 0; i < real.length; i++) {
+      const l = real[i], t = l.text.trim();
+      const heading = l.size >= body * 1.3 && t.length <= 40;
+      const prev = real[i - 1];
+      const gap = prev ? prev.y - l.y : 0;
+      const breakPara = !cur || heading || cur.type === 'h' || gap > Math.max(l.size, body) * 1.7 || gap < -l.size
+        || (prev && prev.xEnd - prev.x < fullW * 0.75) // 上一行没写满，说明段落结束了
+        || /^([•·●▪■◆\-–—*]|\d+[.、)]|[（(]?[一二三四五六七八九十]+[）)、.])\s*/.test(t);
+      if (breakPara) {
+        cur = { type: heading ? 'h' : 'p', y: l.y, text: t, size: l.size };
+        blocks.push(cur);
+      } else {
+        cur.text = joinText(cur.text, t);
+      }
+    }
+    return blocks;
+  }
+
+  async function blobOf(canvas) {
+    let blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    let ext = 'png';
+    if (blob && blob.size > 600 * 1024) { blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.88)); ext = 'jpg'; }
+    return { blob, ext };
+  }
+
+  async function pdfToNote(name, btn) {
+    const v = await ask({ title: '把 PDF 转成说明', text: '文字会整理成段落和标题，图片会放在原来的位置，转好以后就能像普通说明一样修改。原来的 PDF 还留在资料里。排版复杂的（比如分两栏的）可能要自己再调一调。', fields: [{ name: 'title', label: '说明的名字', value: name.replace(/\.pdf$/i, '') }], okText: '开始转' });
+    if (!v) return;
+    if (btn) btn.disabled = true;
+    const base = (v.title || name).replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40) || 'PDF';
+    try {
+      const lib = await loadPdfjs();
+      toast('正在读 PDF…', 600000);
+      const data = await (await fetch(fileUrl(name))).arrayBuffer();
+      const doc = await lib.getDocument({ data, cMapUrl: '/pdfjs/cmaps/', cMapPacked: true, isEvalSupported: false }).promise;
+      const OPS = lib.OPS;
+      const out = [];
+      let imgCount = 0;
+      for (let pn = 1; pn <= doc.numPages; pn++) {
+        toast(`正在转第 ${pn} / ${doc.numPages} 页…`, 600000);
+        const page = await doc.getPage(pn);
+        const content = await page.getTextContent();
+        const blocks = pageBlocks(content.items);
+        // 找出页面上画图片的位置
+        const ops = await page.getOperatorList();
+        const rects = [];
+        const stack = [];
+        let m = [1, 0, 0, 1, 0, 0];
+        const mul = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+        for (let i = 0; i < ops.fnArray.length; i++) {
+          const fn = ops.fnArray[i];
+          if (fn === OPS.save) stack.push(m);
+          else if (fn === OPS.restore) m = stack.pop() || [1, 0, 0, 1, 0, 0];
+          else if (fn === OPS.transform) m = mul(m, ops.argsArray[i]);
+          else if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject || fn === OPS.paintImageXObjectRepeat) {
+            const xs = [m[4], m[0] + m[4], m[2] + m[4], m[0] + m[2] + m[4]];
+            const ys = [m[5], m[1] + m[5], m[3] + m[5], m[1] + m[3] + m[5]];
+            rects.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
+          }
+        }
+        const vp1 = page.getViewport({ scale: 1 });
+        const pageArea = vp1.width * vp1.height;
+        const noText = !blocks.length;
+        // 有文字的页面上铺满整页的图一般是背景或水印，不要
+        const imgs = rects.filter(r => {
+          const w = r[2] - r[0], h = r[3] - r[1];
+          return w >= 24 && h >= 24 && (noText || w * h < pageArea * 0.85);
+        });
+        const items = blocks.map(b => ({ ...b }));
+        if (imgs.length || noText) {
+          const vp = page.getViewport({ scale: 2 });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(vp.width); canvas.height = Math.ceil(vp.height);
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+          const crops = noText && !imgs.length ? [null] : imgs;
+          for (const r of crops) {
+            let c = canvas, top;
+            if (r) {
+              const [x0, y0, x1, y1] = vp.convertToViewportRectangle(r);
+              const sx = Math.max(0, Math.floor(Math.min(x0, x1))), sy = Math.max(0, Math.floor(Math.min(y0, y1)));
+              const sw = Math.min(canvas.width - sx, Math.ceil(Math.abs(x1 - x0))), sh = Math.min(canvas.height - sy, Math.ceil(Math.abs(y1 - y0)));
+              if (sw < 8 || sh < 8) continue;
+              c = document.createElement('canvas');
+              c.width = sw; c.height = sh;
+              c.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+              top = r[3];
+            } else top = vp1.height + 1;
+            const { blob, ext } = await blobOf(c);
+            if (!blob) continue;
+            const up = await uploadFile(blob, `${base}-${pn}-${++imgCount}.${ext}`, 'image');
+            if (up.ok) items.push({ type: 'img', y: top, url: up.url });
+          }
+          canvas.width = canvas.height = 0;
+        }
+        // 从上往下排（PDF 里 y 越大越靠上）
+        items.sort((a, b) => b.y - a.y);
+        for (const it of items) {
+          if (it.type === 'img') out.push(`![](${it.url})`);
+          else if (it.type === 'h') out.push('## ' + it.text);
+          else out.push(it.text.replace(/^([#>])/, '\\$1'));
+        }
+        page.cleanup();
+      }
+      const pages = doc.numPages;
+      await doc.destroy();
+      const text = `# ${base}\n标签: 资料, PDF\n\n> 从"${name}"转过来的，原文件还在资料里。\n\n${out.join('\n\n')}\n`;
+      const r = await api('/api/new-note', { method: 'POST', json: { title: base, text, page: pageOf('file', name) } });
+      if (!r.ok) throw new Error(r.message || '没存上');
+      toast(`转好了：${pages} 页、${imgCount} 张图片。点"编辑"就能修改`, 6000);
+      await loadNotes();
+      openNote(r.id);
+    } catch (e) {
+      toast('没转成：' + (e && e.message || e), 6000);
+    } finally { if (btn) btn.disabled = false; }
+  }
 
   async function openNote(id, { edit = false } = {}) {
     if (state.editing && !confirmLeave()) return;
