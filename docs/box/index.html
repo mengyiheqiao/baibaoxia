@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>末影箱网页版</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='6' width='26' height='22' rx='2' fill='%23233a5a'/%3E%3Crect x='3' y='6' width='26' height='7' fill='%23142338'/%3E%3Ccircle cx='16' cy='20' r='3' fill='%2392e0d0'/%3E%3C/svg%3E">
+<style>
+:root {
+  --page: #eef0ec; --surface: #fbfaf6; --ink: #1d2a27; --muted: #5d6c67; --line: #cfd4cb;
+  --accent: #2f4a43; --accent-ink: #f3f1ea; --ok: #48b07a; --err: #c4503a; --warn-bg: #fff6dc; --warn-line: #e2c87e;
+  --sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #141b19; --surface: #1c2523; --ink: #e4e9e2; --muted: #9aa8a2; --line: #2d3a36;
+    --accent: #7fc4a8; --accent-ink: #0d1513; --warn-bg: #2c2818; --warn-line: #6b5a2c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #141b19; --surface: #1c2523; --ink: #e4e9e2; --muted: #9aa8a2; --line: #2d3a36;
+  --accent: #7fc4a8; --accent-ink: #0d1513; --warn-bg: #2c2818; --warn-line: #6b5a2c; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.6 var(--sans); }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 60px; }
+h1 { font-size: 24px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; margin: 14px 0; }
+label.field { display: block; margin: 10px 0; }
+label.field > span { display: block; font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+input[type=text], input[type=password], textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--page); color: var(--ink); font: inherit; }
+textarea { font-family: Consolas, monospace; font-size: 12px; }
+button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 7px 14px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+button.danger { color: var(--err); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--muted); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 18px 0 0; }
+.tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 14px; }
+.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+ul.list { list-style: none; margin: 0; padding: 0; }
+ul.list li { display: flex; gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--line); }
+ul.list li .main { flex: 1; min-width: 0; }
+ul.list li .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.list li small { color: var(--muted); }
+.drop { border: 2px dashed var(--line); border-radius: 12px; padding: 16px; text-align: center; color: var(--muted); margin: 12px 0; }
+.drop.over { border-color: var(--accent); color: var(--ink); }
+.note-view { white-space: pre-wrap; word-break: break-word; background: var(--page); border: 1px solid var(--line); border-radius: 8px; padding: 14px; max-height: 70vh; overflow: auto; }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+.err { color: var(--err); }
+.status { font-size: 13px; color: var(--muted); min-height: 1.6em; }
+a { color: var(--accent); }
+.empty { color: var(--muted); padding: 18px 0; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>末影箱网页版</h1>
+  <p class="sub">不用装百宝匣，在任何电脑的浏览器里打开自己的末影箱：拿口袋里的文件、看记忆区的说明、找工具的安装包。所有加密解密都在这个网页里完成，密码不会发到任何地方。</p>
+
+  <section id="login" class="card">
+    <div class="seg" role="tablist"><button type="button" class="on" data-mode="code">我有连接码</button><button type="button" data-mode="token">仓库 + 令牌</button></div>
+    <div id="by-code">
+      <label class="field"><span>连接码</span><textarea id="code" rows="3" placeholder="BBX1.…" spellcheck="false"></textarea></label>
+    </div>
+    <div id="by-token" hidden>
+      <label class="field"><span>仓库</span><input type="text" id="repo" placeholder="你的用户名/my-box" spellcheck="false" autocomplete="off"></label>
+      <label class="field"><span>令牌</span><input type="password" id="token" placeholder="github_pat_…" autocomplete="off"></label>
+    </div>
+    <label class="field"><span>箱子密码</span><input type="password" id="pw" autocomplete="off"></label>
+    <div class="row"><button class="primary" id="go">打开末影箱</button><span class="status" id="login-status"></span></div>
+    <p class="sub" style="margin-top:12px">连接码在已经连上末影箱的百宝匣里生成：口袋 → 末影箱设置 → 连接码。用完关掉这个网页就行，这里什么都不会记住。</p>
+  </section>
+
+  <section id="app" hidden>
+    <div class="card" style="padding:12px 16px">
+      <div class="row"><span>已打开 <b id="repo-name"></b></span><span style="flex:1"></span><button id="refresh">刷新</button><button id="logout">关上</button></div>
+      <div class="status" id="status"></div>
+    </div>
+    <nav class="tabs">
+      <button class="on" data-tab="pocket">随身口袋</button>
+      <button data-tab="memory">记忆区</button>
+      <button data-tab="tools">工具</button>
+    </nav>
+    <div class="card" id="tab-pocket">
+      <div class="drop" id="drop">把文件拖到这里放进口袋，或者 <button class="link" id="pick">选文件</button><input type="file" id="file" multiple hidden></div>
+      <ul class="list" id="pocket-list"></ul>
+    </div>
+    <div class="card" id="tab-memory" hidden>
+      <div id="memory-body"></div>
+    </div>
+    <div class="card" id="tab-tools" hidden>
+      <div id="tools-body"></div>
+    </div>
+  </section>
+
+  <p class="sub" style="margin-top:28px">还没有百宝匣？<a href="https://github.com/mengyiheqiao/baibaoxia/releases/latest" target="_blank" rel="noopener">下载百宝匣</a>（桌面版解压就能用，在别人的电脑上选"临时用一下"，关掉就删干净）。<a href="https://github.com/mengyiheqiao/baibaoxia/blob/main/docs/%E6%9C%AB%E5%BD%B1%E7%AE%B1.md" target="_blank" rel="noopener">末影箱是什么</a></p>
+</main>
+
+<script>
+'use strict';
+(function () {
+  // 只认 GitHub；测试时可以指到本机的假服务器（只认 127.0.0.1，免得被人用链接骗走令牌）
+  const apiParam = new URLSearchParams(location.search).get('api') || '';
+  const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(apiParam) ? apiParam : 'https://api.github.com';
+  const CHUNK = 25 * 1024 * 1024;
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+  const fmtDate = ms => { const d = new Date(ms), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+
+  // ---------------------------------------------------------------- scrypt（浏览器没有自带，自己算；和百宝匣里的结果一模一样）
+  async function pbkdf2(pass, salt, len) {
+    const k = await crypto.subtle.importKey('raw', pass, 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 1, hash: 'SHA-256' }, k, len * 8));
+  }
+  function salsa8(B, x) {
+    x.set(B);
+    for (let i = 0; i < 8; i += 2) {
+      let u;
+      u = x[0] + x[12]; x[4] ^= (u << 7) | (u >>> 25); u = x[4] + x[0]; x[8] ^= (u << 9) | (u >>> 23);
+      u = x[8] + x[4]; x[12] ^= (u << 13) | (u >>> 19); u = x[12] + x[8]; x[0] ^= (u << 18) | (u >>> 14);
+      u = x[5] + x[1]; x[9] ^= (u << 7) | (u >>> 25); u = x[9] + x[5]; x[13] ^= (u << 9) | (u >>> 23);
+      u = x[13] + x[9]; x[1] ^= (u << 13) | (u >>> 19); u = x[1] + x[13]; x[5] ^= (u << 18) | (u >>> 14);
+      u = x[10] + x[6]; x[14] ^= (u << 7) | (u >>> 25); u = x[14] + x[10]; x[2] ^= (u << 9) | (u >>> 23);
+      u = x[2] + x[14]; x[6] ^= (u << 13) | (u >>> 19); u = x[6] + x[2]; x[10] ^= (u << 18) | (u >>> 14);
+      u = x[15] + x[11]; x[3] ^= (u << 7) | (u >>> 25); u = x[3] + x[15]; x[7] ^= (u << 9) | (u >>> 23);
+      u = x[7] + x[3]; x[11] ^= (u << 13) | (u >>> 19); u = x[11] + x[7]; x[15] ^= (u << 18) | (u >>> 14);
+      u = x[0] + x[3]; x[1] ^= (u << 7) | (u >>> 25); u = x[1] + x[0]; x[2] ^= (u << 9) | (u >>> 23);
+      u = x[2] + x[1]; x[3] ^= (u << 13) | (u >>> 19); u = x[3] + x[2]; x[0] ^= (u << 18) | (u >>> 14);
+      u = x[5] + x[4]; x[6] ^= (u << 7) | (u >>> 25); u = x[6] + x[5]; x[7] ^= (u << 9) | (u >>> 23);
+      u = x[7] + x[6]; x[4] ^= (u << 13) | (u >>> 19); u = x[4] + x[7]; x[5] ^= (u << 18) | (u >>> 14);
+      u = x[10] + x[9]; x[11] ^= (u << 7) | (u >>> 25); u = x[11] + x[10]; x[8] ^= (u << 9) | (u >>> 23);
+      u = x[8] + x[11]; x[9] ^= (u << 13) | (u >>> 19); u = x[9] + x[8]; x[10] ^= (u << 18) | (u >>> 14);
+      u = x[15] + x[14]; x[12] ^= (u << 7) | (u >>> 25); u = x[12] + x[15]; x[13] ^= (u << 9) | (u >>> 23);
+      u = x[13] + x[12]; x[14] ^= (u << 13) | (u >>> 19); u = x[14] + x[13]; x[15] ^= (u << 18) | (u >>> 14);
+    }
+    for (let i = 0; i < 16; i++) B[i] += x[i];
+  }
+  function blockMix(B, Y, r, X, tmp) {
+    X.set(B.subarray((2 * r - 1) * 16, 2 * r * 16));
+    for (let i = 0; i < 2 * r; i++) {
+      for (let k = 0; k < 16; k++) X[k] ^= B[i * 16 + k];
+      salsa8(X, tmp);
+      Y.set(X, ((i & 1) * r + (i >> 1)) * 16);
+    }
+  }
+  async function scrypt(password, salt, N, r, p, len, onProgress) {
+    const P = enc.encode(String(password).normalize('NFC'));
+    const B = await pbkdf2(P, salt, p * 128 * r);
+    const W = 32 * r;
+    const X = new Uint32Array(W), Y = new Uint32Array(W), V = new Uint32Array(W * N), T = new Uint32Array(16), tmp = new Uint32Array(16);
+    const dv = new DataView(B.buffer);
+    for (let b = 0; b < p; b++) {
+      for (let i = 0; i < W; i++) X[i] = dv.getUint32(b * 128 * r + i * 4, true);
+      for (let i = 0; i < N; i++) {
+        V.set(X, i * W); blockMix(X, Y, r, T, tmp); X.set(Y);
+        if ((i & 4095) === 0) { onProgress && onProgress(i / N / 2); await new Promise(res => setTimeout(res, 0)); }
+      }
+      for (let i = 0; i < N; i++) {
+        const j = X[(2 * r - 1) * 16] & (N - 1);
+        for (let k = 0; k < W; k++) X[k] ^= V[j * W + k];
+        blockMix(X, Y, r, T, tmp); X.set(Y);
+        if ((i & 4095) === 0) { onProgress && onProgress(0.5 + i / N / 2); await new Promise(res => setTimeout(res, 0)); }
+      }
+      for (let i = 0; i < W; i++) dv.setUint32(b * 128 * r + i * 4, X[i], true);
+    }
+    return pbkdf2(P, B, len);
+  }
+  window.__scrypt = scrypt; // 给测试用
+
+  // ---------------------------------------------------------------- AES-256-GCM：格式 iv(12) | 密文 | tag(16)，和百宝匣一样
+  const b64 = { from: s => Uint8Array.from(atob(s.replace(/\s+/g, '')), c => c.charCodeAt(0)), to: u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); } };
+  const b64url = s => b64.from(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+  async function aesKey(raw) { return crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']); }
+  async function decrypt(key, u8) {
+    return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: u8.subarray(0, 12) }, key, u8.subarray(12)));
+  }
+  async function encrypt(key, u8) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, u8));
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return out;
+  }
+  const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  const randHex = n => hex(crypto.getRandomValues(new Uint8Array(n)));
+
+  // ---------------------------------------------------------------- GitHub
+  let S = null; // { repo, token, key, branch, man, head, baseTree }
+  async function gh(method, p, body, okCodes = [200, 201]) {
+    let r;
+    try {
+      r = await fetch(`${API}/repos/${S.repo}${p}`, { method, headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${S.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+    } catch { throw new Error('连不上 GitHub。这台电脑的网络可能访问不了 GitHub，换个网络或者开代理试试。'); }
+    const data = await r.json().catch(() => null);
+    if (!okCodes.includes(r.status)) {
+      const e = new Error(r.status === 401 ? '令牌不对或者过期了。' : r.status === 404 && p === '' ? '找不到这个仓库，或者令牌没有勾上它。' : r.status === 403 ? '令牌没有权限（Contents 要 Read and write）。' : `GitHub 出错了（${r.status}${data && data.message ? '：' + data.message : ''}）`);
+      e.status = r.status; throw e;
+    }
+    return { status: r.status, data };
+  }
+  async function getBlob(sha) { return b64.from((await gh('GET', `/git/blobs/${sha}`)).data.content); }
+  async function putBlob(u8) { return (await gh('POST', '/git/blobs', { content: b64.to(u8), encoding: 'base64' })).data.sha; }
+  async function load() {
+    const ref = await gh('GET', `/git/ref/heads/${encodeURIComponent(S.branch)}`, undefined, [200, 404, 409]);
+    if (ref.status !== 200) throw new Error('这个仓库还是空的，先在百宝匣里连一次末影箱。');
+    S.head = ref.data.object.sha;
+    const c = await gh('GET', `/git/commits/${S.head}`);
+    S.baseTree = c.data.tree.sha;
+    const t = await gh('GET', `/git/trees/${S.baseTree}`);
+    return t.data.tree || [];
+  }
+  async function loadManifest() {
+    const entries = await load();
+    const be = entries.find(x => x.path === 'box.json');
+    S.man = be ? JSON.parse(dec.decode(await decrypt(S.key, await getBlob(be.sha)))) : { v: 1, files: {}, docs: {} };
+    if (!S.man.files) S.man.files = {};
+    if (!S.man.docs) S.man.docs = {};
+  }
+  // 改清单：拿最新的清单，改，提交；别的电脑同时在改就重来
+  async function commitChange(edit, changes0 = [], message = '网页版') {
+    for (let i = 0; i < 4; i++) {
+      await loadManifest();
+      const old = JSON.parse(JSON.stringify(S.man.files));
+      edit(S.man);
+      const changes = [...changes0];
+      const used = new Set();
+      for (const e of Object.values(S.man.files)) for (const ch of e.chunks || []) used.add(ch.p);
+      for (const e of Object.values(old)) for (const ch of e.chunks || []) if (!used.has(ch.p)) { changes.push({ path: ch.p, mode: '100644', type: 'blob', sha: null }); used.add(ch.p); }
+      S.man.v = (S.man.v || 0) + 1; S.man.at = Date.now();
+      changes.push({ path: 'box.json', mode: '100644', type: 'blob', sha: await putBlob(await encrypt(S.key, enc.encode(JSON.stringify(S.man)))) });
+      const tree = await gh('POST', '/git/trees', { base_tree: S.baseTree, tree: changes });
+      const commit = await gh('POST', '/git/commits', { message: `百宝匣·${message}`, tree: tree.data.sha, parents: [S.head] });
+      const r = await gh('PATCH', `/git/refs/heads/${encodeURIComponent(S.branch)}`, { sha: commit.data.sha, force: false }, [200, 409, 422]);
+      if (r.status === 200) return;
+    }
+    throw new Error('一直有别的电脑在同时修改，过一会儿再试。');
+  }
+  async function fetchFile(e, label) {
+    const parts = [];
+    for (let i = 0; i < e.chunks.length; i++) {
+      status(`正在下载 ${label}（${i + 1}/${e.chunks.length}）…`);
+      parts.push(await decrypt(S.key, await getBlob(e.chunks[i].s)));
+    }
+    return new Blob(parts);
+  }
+  function saveBlob(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  }
+
+  // ---------------------------------------------------------------- 打开
+  let mode = 'code';
+  document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x === b));
+    $('#by-code').hidden = mode !== 'code'; $('#by-token').hidden = mode !== 'token';
+  }));
+  const loginStatus = t => { $('#login-status').textContent = t; };
+  const status = t => { $('#status').textContent = t || ''; };
+
+  async function readCode(code, pw) {
+    const m = /BBX1\.([A-Za-z0-9_-]+)/.exec(code.replace(/\s+/g, ''));
+    if (!m) return null;
+    const buf = b64url(m[1]);
+    const k = await aesKey(await scrypt(pw, buf.subarray(0, 16), 1 << 15, 8, 1, 32, f => loginStatus(`正在解开连接码…${Math.round(f * 100)}%`)));
+    try { const j = JSON.parse(dec.decode(await decrypt(k, buf.subarray(16)))); return j.repo && j.token ? j : null; } catch { return null; }
+  }
+
+  $('#go').addEventListener('click', async () => {
+    const btn = $('#go'); btn.disabled = true;
+    try {
+      const pw = $('#pw').value;
+      if (pw.length < 6) throw new Error('箱子密码至少 6 位。');
+      let repo, token;
+      if (mode === 'code') {
+        const c = await readCode($('#code').value, pw);
+        if (!c) throw new Error('连接码和密码对不上。检查一下连接码有没有复制完整、密码对不对。');
+        repo = c.repo; token = c.token;
+      } else {
+        repo = $('#repo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/+$/, '');
+        token = $('#token').value.trim();
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error('仓库填"用户名/仓库名"。');
+        if (!token) throw new Error('还没填令牌。');
+      }
+      S = { repo, token };
+      loginStatus('正在连接 GitHub…');
+      const info = (await gh('GET', '')).data;
+      S.branch = info.default_branch || 'main';
+      const entries = await load();
+      const se = entries.find(x => x.path === 'box-salt.json');
+      if (!se) throw new Error('这个仓库还不是末影箱。');
+      const salt = JSON.parse(dec.decode(await getBlob(se.sha)));
+      const raw = await scrypt(pw, b64.from(salt.salt), salt.N || 32768, salt.r || 8, salt.p || 1, 32, f => loginStatus(`正在算钥匙…${Math.round(f * 100)}%`));
+      S.key = await aesKey(raw);
+      try { if (dec.decode(await decrypt(S.key, b64.from(salt.check))) !== 'baibaoxia-box-v1') throw 0; } catch { throw new Error('箱子密码不对。'); }
+      loginStatus('正在打开…');
+      await loadManifest();
+      $('#login').hidden = true; $('#app').hidden = false;
+      $('#repo-name').textContent = repo;
+      $('#pw').value = ''; $('#token').value = ''; $('#code').value = '';
+      loginStatus('');
+      render();
+    } catch (e) {
+      S = null;
+      loginStatus(e.message || String(e));
+      $('#login-status').classList.add('err');
+    } finally { btn.disabled = false; }
+  });
+  $('#logout').addEventListener('click', () => { S = null; location.reload(); });
+  $('#refresh').addEventListener('click', async () => { status('刷新中…'); try { await loadManifest(); render(); status(''); } catch (e) { status(e.message); } });
+
+  // ---------------------------------------------------------------- 三个页签
+  let tab = 'pocket';
+  document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => {
+    tab = b.dataset.tab;
+    document.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === b));
+    for (const k of ['pocket', 'memory', 'tools']) $('#tab-' + k).hidden = k !== tab;
+    render();
+  }));
+  const live = pre => Object.entries(S.man.files).filter(([k, e]) => k.startsWith(pre) && !e.deleted).map(([k, e]) => ({ key: k, name: k.slice(pre.length), ...e }));
+
+  function render() {
+    if (!S || !S.man) return;
+    const pocket = live('pocket/').sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+    $('#pocket-list').innerHTML = pocket.length ? pocket.map(f => `<li data-key="${esc(f.key)}">
+      <span class="main"><span class="name">${esc(f.name)}</span><small>${fmtSize(f.size)} · ${fmtDate(f.mtime || f.at)}${f.by ? ' · 来自' + esc(f.by) : ''}</small></span>
+      <button data-act="dl">下载</button><button class="link danger" data-act="del">删除</button></li>`).join('') : '<li class="empty">口袋是空的。</li>';
+
+    const notes = live('memory/').filter(f => !f.name.includes('/') && /\.md$/i.test(f.name)).sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+    const files = live('memory/资料/').filter(f => !f.name.includes('/'));
+    $('#memory-body').innerHTML = notes.length || files.length ? `
+      <h3 style="margin:0 0 6px">说明</h3>
+      <ul class="list">${notes.map(f => `<li data-key="${esc(f.key)}"><span class="main"><span class="name">${esc(f.name.replace(/\.md$/i, ''))}</span></span><button data-act="view">看</button></li>`).join('') || '<li class="empty">没有说明。</li>'}</ul>
+      <div id="note-view" hidden></div>
+      <h3 style="margin:18px 0 6px">资料</h3>
+      <ul class="list">${files.map(f => `<li data-key="${esc(f.key)}"><span class="main"><span class="name">${esc(f.name)}</span><small>${fmtSize(f.size)}</small></span><button data-act="dl">下载</button></li>`).join('') || '<li class="empty">没有资料。</li>'}</ul>`
+      : '<p class="empty">末影箱里没有记忆区。在百宝匣的 口袋 → 末影箱设置 里打开"同步记忆区"。</p>';
+
+    const tools = (S.man.docs['cfg/tools'] || {}).json || [];
+    const clean = n => String(n).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/^\.+/, '').trim().slice(0, 80);
+    $('#tools-body').innerHTML = tools.length ? `<ul class="list">${tools.map(t => {
+      const carry = t['带走'] || {};
+      const kitKey = carry['安装包'] ? `kit/${clean(t['名字'])}/${carry['安装包']}` : '';
+      const kit = kitKey && S.man.files[kitKey] && !S.man.files[kitKey].deleted ? S.man.files[kitKey] : null;
+      const url = t['类型'] === '网址' ? t['网址'] : '';
+      return `<li data-key="${esc(kitKey)}"><span>${esc(t['图标'] && !/^图标\//.test(t['图标']) ? t['图标'] : '◻')}</span>
+        <span class="main"><span class="name">${esc(t['名字'])}</span><small>${esc(t['类型'] || '')}${t['一句话'] ? ' · ' + esc(t['一句话']) : ''}</small></span>
+        ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">打开</a>` : ''}
+        ${carry['下载'] ? `<a href="${esc(carry['下载'])}" target="_blank" rel="noopener">下载页</a>` : ''}
+        ${kit ? `<button data-act="dl" title="${esc(carry['安装包'])}">安装包 ${fmtSize(kit.size)}</button>` : ''}
+      </li>`;
+    }).join('')}</ul>` : '<p class="empty">末影箱里没有工具。在百宝匣的 口袋 → 末影箱设置 里打开"同步工具"。</p>';
+  }
+
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('[data-act]');
+    if (!b || !S) return;
+    const key = b.closest('[data-key]') && b.closest('[data-key]').dataset.key;
+    const f = key && S.man.files[key];
+    try {
+      if (b.dataset.act === 'dl' && f) {
+        b.disabled = true;
+        saveBlob(await fetchFile(f, key.split('/').pop()), key.split('/').pop());
+        status('');
+      } else if (b.dataset.act === 'view' && f) {
+        const text = await (await fetchFile(f, key.split('/').pop())).text();
+        const v = $('#note-view');
+        v.hidden = false;
+        v.innerHTML = `<div class="row" style="margin:12px 0 6px"><b>${esc(key.split('/').pop().replace(/\.md$/i, ''))}</b><span style="flex:1"></span><button data-act="close-note">收起</button></div><div class="note-view">${esc(text)}</div>`;
+        v.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        status('');
+      } else if (b.dataset.act === 'close-note') {
+        $('#note-view').hidden = true;
+      } else if (b.dataset.act === 'del' && f) {
+        const name = key.slice('pocket/'.length);
+        if (!confirm(`从末影箱里删掉"${name}"？连着末影箱的电脑上也会删掉（会先放进回收站）。`)) return;
+        status('正在删除…');
+        await commitChange(man => { man.files[key] = { deleted: true, at: Date.now(), by: '网页版' }; }, [], '网页版删除');
+        status('删掉了。'); render();
+      }
+    } catch (err) { status(err.message || String(err)); }
+    finally { b.disabled = false; }
+  });
+
+  // ---------------------------------------------------------------- 放进口袋
+  async function upload(list) {
+    for (const file of list) {
+      try {
+        const name = file.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/^\.+/, '').trim().slice(0, 80) || '文件';
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const hash = hex(await crypto.subtle.digest('SHA-256', buf));
+        const id = randHex(8), chunks = [], changes = [];
+        const n = Math.max(1, Math.ceil(buf.length / CHUNK));
+        for (let k = 0; k < n; k++) {
+          status(`正在加密上传 ${name}（${k + 1}/${n}）…`);
+          const p = `o/${id}-${k}`;
+          const s = await putBlob(await encrypt(S.key, buf.subarray(k * CHUNK, (k + 1) * CHUNK)));
+          chunks.push({ p, s }); changes.push({ path: p, mode: '100644', type: 'blob', sha: s });
+        }
+        status(`正在保存 ${name}…`);
+        await commitChange(man => { man.files['pocket/' + name] = { id, size: buf.length, mtime: file.lastModified || Date.now(), hash, chunks, by: '网页版', at: Date.now() }; }, changes, '网页版上传');
+        status(`放进口袋了：${name}`);
+      } catch (e) { status(e.message || String(e)); return; }
+    }
+    render();
+  }
+  $('#pick').addEventListener('click', () => $('#file').click());
+  $('#file').addEventListener('change', e => { upload([...e.target.files]); e.target.value = ''; });
+  const drop = $('#drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (S) upload([...e.dataTransfer.files]); });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+})();
+</script>
+</body>
+</html>

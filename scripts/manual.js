@@ -71,3 +71,8 @@ Windows 设置 → 时间和语言 → 语言和区域 → 中文（简体）旁
 const out = path.join(SRC, 'docs', '使用手册.md');
 fs.writeFileSync(out, head + '\n' + body + '\n' + faq);
 console.log('写好了', path.relative(SRC, out));
+
+// 末影箱网页版：GitHub Pages 上那份（docs/box/index.html）和软件里的 public/box.html 保持一样
+fs.mkdirSync(path.join(SRC, 'docs', 'box'), { recursive: true });
+fs.copyFileSync(path.join(SRC, 'public', 'box.html'), path.join(SRC, 'docs', 'box', 'index.html'));
+console.log('写好了 docs/box/index.html');

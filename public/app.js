@@ -3975,7 +3975,7 @@
         <button class="btn ghost" data-act="pk-trash">回收站</button>
         ${pk.box.connected ? '<button class="btn ghost" data-act="pk-form">末影箱设置</button>' : ''}
       </div>
-      ${pk.box.connected ? '<p class="sub">没装百宝匣的电脑：下载 Releases 里的 Baibaoxia-Box-Web.html，用浏览器打开，贴连接码、输密码就能拿文件。<a href="/box.html" target="_blank" rel="noopener">看看网页版</a></p>' : ''}
+      ${pk.box.connected ? '<p class="sub">没装百宝匣的电脑：浏览器打开 <a href="https://mengyiheqiao.github.io/baibaoxia/box/" target="_blank" rel="noopener">末影箱网页版</a>，贴连接码、输密码就能拿文件。</p>' : ''}
       <p class="sub">${pk.box.connected ? '20 MB 以下的文件会自动同步到每台连着同一个末影箱的电脑；更大的文件在别的电脑上显示为"在云端"，要用时点"拿下来"。' : '连上末影箱以后，在学校、公司的电脑上打开百宝匣，连上同一个末影箱就能拿到这些文件。'}</p>`;
   }
 
