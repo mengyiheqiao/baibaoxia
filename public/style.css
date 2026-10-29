@@ -996,3 +996,10 @@ body.has-mascot .butler-face { display: none; }
 .carry-edit summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
 .carry-edit .field > div { padding: 4px 0; }
 .carry-warn { color: var(--lamp-err); }
+
+/* ---- 0.19 Live2D 看板娘 */
+#mascot .mc-l2d { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#mascot.l2d .mc-img { display: none; }
+#mascot.l2d .mc-body, #mascot.l2d[data-mood] .mc-body { animation: none; }
+#mascot.l2d.mc-hop .mc-body { animation: mc-hop .55s cubic-bezier(.3, 1.4, .5, 1); }
+#mascot.l2d.mc-shake .mc-body { animation: mc-shake .4s ease-out; }

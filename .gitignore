@@ -25,3 +25,5 @@ package-lock.json
 .DS_Store
 Thumbs.db
 desktop.ini
+/.live2d/
+/live2dcubismcore.min.js

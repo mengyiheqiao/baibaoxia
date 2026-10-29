@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.18.0';
+const VERSION = '0.19.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -2113,6 +2113,29 @@ function privateBlocked() {
 }
 fs.mkdirSync(POCKET_DIR, { recursive: true });
 
+// ---- Live2D Cubism Core：放在百宝匣文件夹里的 .live2d（或者自己放一份 live2dcubismcore.min.js 在百宝匣文件夹里）
+const L2D_CORE_URL = process.env.BAIBAO_L2D_CORE_URL || 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js';
+const L2D_DIR = path.join(ROOT, '.live2d');
+let l2dFetching = null;
+async function live2dCore() {
+  const manual = path.join(ROOT, 'live2dcubismcore.min.js');
+  if (fs.existsSync(manual)) return manual;
+  const f = path.join(L2D_DIR, 'live2dcubismcore.min.js');
+  if (fs.existsSync(f) && fs.statSync(f).size > 50000) return f;
+  if (!l2dFetching) l2dFetching = (async () => {
+    let r;
+    try { r = await net.request(L2D_CORE_URL, { proxy: proxySetting(), timeout: 30000, maxBytes: 5 * 1024 * 1024 }); }
+    catch (e) { throw new Error('Live2D 运行库没下载下来：' + net.netError(e, proxySetting())); }
+    if (r.status !== 200 || r.body.length < 50000 || !/Live2DCubismCore/.test(r.body.subarray(0, 4000).toString('utf8'))) throw new Error(`Live2D 运行库没下载下来（${r.status}）`);
+    fs.mkdirSync(L2D_DIR, { recursive: true });
+    if (IS_WIN) exec(`attrib +h "${L2D_DIR}"`, { windowsHide: true }, () => {});
+    fs.writeFileSync(f + '.tmp', r.body);
+    fs.renameSync(f + '.tmp', f);
+  })().finally(() => { l2dFetching = null; });
+  await l2dFetching;
+  return f;
+}
+
 // ---- 带走方式：工具在别的电脑上没有的时候怎么办
 const kitDirOf = name => path.join(KIT_DIR, cleanName(name) || '工具');
 function toolMissing(tool) {
@@ -3289,7 +3312,7 @@ const server = http.createServer(async (req, res) => {
       const f = d && safeJoin(d, m[2]);
       if (!f || f.includes(`${path.sep}.`) && !d.includes(`${path.sep}.皮肤`)) return send(res, 404, { error: '找不到' });
       const ext = path.extname(f).toLowerCase();
-      const type = ({ '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8' })[ext];
+      const type = ({ '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.moc3': 'application/octet-stream' })[ext];
       if (!type) return send(res, 404, { error: '找不到' });
       fs.readFile(f, (err, data) => {
         if (err) return send(res, 404, { error: '找不到' });
@@ -3307,6 +3330,16 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(ICON_DIR, p.slice('/图标/'.length));
       if (!f) return send(res, 403, { error: 'forbidden' });
       return sendFile(res, f, req);
+    }
+    // Live2D 看板娘要用的 Cubism Core：Live2D 公司的专有运行库，不随百宝匣分发，第一次用时从官网下载一份
+    if (p === '/live2d-core.js' && req.method === 'GET') {
+      try {
+        return sendFile(res, await live2dCore(), req);
+      } catch (e) {
+        // 回一段脚本把原因告诉页面（用 200，浏览器才会执行它）
+        res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+        return res.end(`window.__l2dCoreError = ${JSON.stringify(e.message || String(e))};`);
+      }
     }
     // 页面上把 PDF 转成说明时要用 PDF.js
     if (p.startsWith('/pdfjs/') && req.method === 'GET') {

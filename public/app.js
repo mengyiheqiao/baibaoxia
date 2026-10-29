@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.18.0';
+  const APP_VERSION = '0.19.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3205,7 +3205,8 @@
       <strong>${priv ? '私密区的皮肤' : '皮肤'}</strong>
       <p class="sub">${priv ? '私密区单独选一套，和外面互不影响。' : '换一身样子，功能都不变。'}也可以把皮肤文件（.bbskin）拖进来，像装游戏 mod 一样，装好就能换上。</p>
       <div class="skin-grid">${cards}</div>
-      ${(r.skins.find(k => k.id === r.current) || {}).mascot ? `<label class="check"><input type="checkbox" id="mascot-on" ${mcOff() ? '' : 'checked'}> <span>显示看板娘<br><small>这套皮肤带了立绘：会呼吸、眨眼，跟着"问问"的回答换动作，点她就能聊天。很久不操作她会犯困。</small></span></label>` : ''}
+      ${(r.skins.find(k => k.id === r.current) || {}).mascot ? `<label class="check"><input type="checkbox" id="mascot-on" ${mcOff() ? '' : 'checked'}> <span>显示看板娘<br><small>${(r.skins.find(k => k.id === r.current) || {}).mascot.live2d ? '这套皮肤带了 Live2D 模型：会呼吸、眨眼，头和眼睛跟着鼠标转，跟着"问问"的回答换表情，说话时会动嘴，点她就能聊天。' : '这套皮肤带了立绘：会呼吸、眨眼，跟着"问问"的回答换动作，点她就能聊天。'}很久不操作她会犯困。</small></span></label>
+        ${mc.l2dError ? `<p class="sub carry-warn">Live2D 模型没加载出来：${esc(mc.l2dError)}。${(r.skins.find(k => k.id === r.current) || {}).mascot.images['待机'] ? '先用立绘代替。' : ''}Live2D 要用到的运行库第一次会从 Live2D 官网下载，连不上的话，可以在"联网代理"里填代理，或者自己下载 live2dcubismcore.min.js 放进百宝匣文件夹，然后刷新页面。</p>` : ''}` : ''}
       <label class="skin-drop" id="skin-drop">
         <input type="file" id="skin-file" accept=".bbskin,.zip" hidden>
         <span>把 <b>.bbskin</b> 皮肤文件拖到这里，或者<u>点这里选文件</u></span>
@@ -3621,17 +3622,171 @@
     const k = r.skins.find(x => x.id === r.current);
     if (!k || !k.mascot || SKIN_OFF || mcOff()) return;
     mc.cfg = k.mascot; mc.skin = k.id; mc.mood = '待机';
-    for (const m of Object.keys(mc.cfg.images)) { const im = new Image(); im.src = mcSrc(m); }
-    const [a, b] = box.querySelectorAll('.mc-img');
-    a.src = mcSrc('待机'); a.classList.add('on'); b.classList.remove('on');
+    l2dStop();
     box.querySelector('.mc-body').setAttribute('aria-label', `和${mc.cfg.name || butlerName()}说话`);
     box.className = '';
+    // Live2D 模型：加载失败（比如运行库下载不下来）就退回立绘
+    if (mc.cfg.live2d) {
+      box.hidden = false;
+      try {
+        await l2dStart(mc.cfg.live2d, k.id, token);
+        if (token !== mc.token) return;
+        box.classList.add('l2d');
+        mc.l2dError = '';
+      } catch (e) {
+        mc.l2dError = String(e && e.message || e);
+        console.warn('Live2D 看板娘没加载成功：', mc.l2dError);
+        l2dStop();
+        if (token !== mc.token) return;
+        if (!mc.cfg.images['待机']) { box.hidden = true; mc.cfg = null; return; }
+      }
+    }
+    if (!box.classList.contains('l2d')) {
+      for (const m of Object.keys(mc.cfg.images)) { const im = new Image(); im.src = mcSrc(m); }
+      const [a, b] = box.querySelectorAll('.mc-img');
+      a.src = mcSrc('待机'); a.classList.add('on'); b.classList.remove('on');
+    }
     box.hidden = false;
     document.body.classList.add('has-mascot');
     mcBlinkLoop();
     const h = new Date().getHours();
     mcSay(h < 5 ? '这么晚了……早点休息吧。' : h < 11 ? '早上好。' : h < 14 ? '中午好。' : h < 18 ? '下午好。' : h < 23 ? '晚上好。' : '夜深了……', 5000);
   }
+  // ---- Live2D 看板娘（0.19）：用 PixiJS + pixi-live2d-display 画，Cubism Core 由后台从 Live2D 官网下载
+  const l2d = { app: null, model: null, cfg: null, over: {}, weights: {}, talkT: 0, mouse: null, tick: null };
+  // 没在皮肤里配的心情，按模型里有的表情、动作猜一个
+  const L2D_GUESS = {
+    开心: { expression: ['微笑', 'smile', 'happy', 'Smile'] },
+    找到了: { expression: ['微笑', 'smile', 'happy', 'Smile'], motion: ['Nod', 'nod', 'TapBody'] },
+    惊讶: { expression: ['惊讶', 'surprised', 'Surprised'] },
+    思考: { params: { ParamAngleZ: 8, ParamAngleY: 5, ParamEyeBallY: 0.6 } },
+    困: { params: { ParamEyeLOpen: 0.35, ParamEyeROpen: 0.35, ParamAngleY: -8 } },
+    玩游戏: { params: { ParamAngleY: -14, ParamEyeBallY: -0.8 } },
+  };
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      if (document.querySelector(`script[data-l2d="${src}"]`)) return res();
+      const el = document.createElement('script');
+      el.src = src; el.dataset.l2d = src;
+      el.onload = () => (window.__l2dCoreError ? rej(new Error(window.__l2dCoreError)) : res());
+      el.onerror = () => { el.remove(); rej(new Error(window.__l2dCoreError || `没加载成功：${src}`)); };
+      document.head.appendChild(el);
+    });
+  }
+  async function l2dLibs() {
+    window.__l2dCoreError = '';
+    if (!window.Live2DCubismCore) await loadScript('/live2d-core.js');
+    if (!window.Live2DCubismCore) throw new Error(window.__l2dCoreError || 'Live2D 运行库没加载成功');
+    if (!window.PIXI) await loadScript('/vendor/pixi.min.js');
+    if (!(window.PIXI && PIXI.live2d)) await loadScript('/vendor/live2d-cubism4.min.js');
+  }
+  function l2dStop() {
+    const box = $('#mascot');
+    box.classList.remove('l2d');
+    if (l2d.tick) { clearInterval(l2d.tick); l2d.tick = null; }
+    if (l2d.app) { try { l2d.app.destroy(false, { children: true }); } catch {} }
+    l2d.app = l2d.model = null;
+    const cv = box.querySelector('canvas.mc-l2d');
+    if (cv) cv.remove();
+  }
+  async function l2dStart(cfg, skinId, token) {
+    await l2dLibs();
+    if (token !== mc.token) return;
+    const body = $('#mascot .mc-body');
+    const cv = document.createElement('canvas');
+    cv.className = 'mc-l2d';
+    body.appendChild(cv);
+    const w = Math.max(120, body.clientWidth || 300), h = Math.max(160, body.clientHeight || 450);
+    const app = new PIXI.Application({ view: cv, width: w, height: h, backgroundAlpha: 0, antialias: true, autoDensity: true, resolution: Math.min(2, window.devicePixelRatio || 1) });
+    l2d.app = app;
+    const url = `/skin/${encodeURIComponent(skinId)}/${cfg.model.split('/').map(encodeURIComponent).join('/')}`;
+    const model = await PIXI.live2d.Live2DModel.from(url, { autoInteract: false });
+    if (token !== mc.token || l2d.app !== app) { try { model.destroy(); } catch {} return; }
+    app.stage.addChild(model);
+    l2d.model = model; l2d.cfg = cfg; l2d.over = {}; l2d.weights = {};
+    l2dFit();
+    // 每一帧最后一步：说话时动嘴，再把心情要的姿势慢慢叠上去
+    model.internalModel.on('beforeModelUpdate', () => {
+      const core = model.internalModel.coreModel;
+      for (const [id, wt] of Object.entries(l2d.weights)) {
+        const target = l2d.over[id];
+        const goal = target === undefined ? 0 : 1;
+        const nw = wt + (goal - wt) * 0.12;
+        l2d.weights[id] = nw;
+        if (target === undefined && nw < 0.01) { delete l2d.weights[id]; continue; }
+        const cur = core.getParameterValueById(id);
+        core.setParameterValueById(id, cur + ((target === undefined ? cur : target) - cur) * nw);
+      }
+      if (mc.mood === '说话' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const t = performance.now() / 1000;
+        const v = Math.max(0, Math.sin(t * 14) * 0.5 + Math.sin(t * 23) * 0.3 + 0.35);
+        core.setParameterValueById(cfg.mouth, Math.min(1, v));
+      }
+    });
+    // 头和眼睛跟着鼠标
+    if (!l2d.mouse) {
+      l2d.mouse = e => {
+        if (!l2d.model) return;
+        const r = $('#mascot').getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height * 0.35;
+        const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / (window.innerWidth * 0.45)));
+        const dy = Math.max(-1, Math.min(1, (cy - e.clientY) / (window.innerHeight * 0.45)));
+        l2d.model.internalModel.focusController.focus(dx, dy);
+      };
+      window.addEventListener('pointermove', l2d.mouse, { passive: true });
+      window.addEventListener('resize', () => { if (l2d.app) { const b = $('#mascot .mc-body'); if (b.clientWidth) { l2d.app.renderer.resize(b.clientWidth, b.clientHeight); l2dFit(); } } });
+    }
+    // 看不见的时候（不在工具区）不画，省电
+    l2d.tick = setInterval(() => {
+      if (!l2d.app) return;
+      // #mascot 是 fixed 定位，offsetParent 永远是 null，要用 getClientRects 判断看不看得见
+      const seen = $('#mascot').getClientRects().length > 0 && !document.hidden;
+      if (seen) {
+        const b = $('#mascot .mc-body'), r = l2d.app.renderer;
+        if (b.clientWidth && (Math.abs(r.width / r.resolution - b.clientWidth) > 2 || Math.abs(r.height / r.resolution - b.clientHeight) > 2)) { r.resize(b.clientWidth, b.clientHeight); l2dFit(); }
+      }
+      if (seen && !l2d.app.ticker.started) l2d.app.ticker.start();
+      if (!seen && l2d.app.ticker.started) l2d.app.ticker.stop();
+    }, 800);
+  }
+  function l2dFit() {
+    const m = l2d.model, app = l2d.app, cfg = l2d.cfg;
+    if (!m || !app) return;
+    const w = app.renderer.width / app.renderer.resolution, h = app.renderer.height / app.renderer.resolution;
+    m.scale.set(1);
+    const s = Math.min(w / m.width, h / m.height) * cfg.scale;
+    m.scale.set(s);
+    m.anchor.set(0.5, 1);
+    m.position.set(w / 2 + cfg.x * w, h + cfg.y * h);
+  }
+  function l2dPick(names, have) { for (const n of names || []) if (have.includes(n)) return n; return ''; }
+  function l2dMood(mood) {
+    const m = l2d.model;
+    if (!m) return;
+    const set = m.internalModel.settings || {};
+    const exprs = (set.expressions || []).map(x => x.Name || x.name);
+    const groups = Object.keys(set.motions || {});
+    const c = l2d.cfg.moods[mood] || {};
+    const g = L2D_GUESS[mood] || {};
+    const expression = c.expression || l2dPick(g.expression, exprs);
+    const motion = c.motion || l2dPick(g.motion, groups);
+    const params = Object.keys(c.params || {}).length ? c.params : (g.params || {});
+    const em = m.internalModel.motionManager.expressionManager;
+    if (motion) m.motion(motion, undefined, 3);
+    // 动作开始时会把表情清掉，晚一点再设
+    setTimeout(() => {
+      if (!l2d.model || mc.mood !== mood) return;
+      if (expression) m.expression(expression);
+      else if (em && em.resetExpression) em.resetExpression();
+    }, motion ? 60 : 0);
+    l2d.over = { ...params };
+    for (const id of Object.keys(params)) if (!(id in l2d.weights)) l2d.weights[id] = 0;
+  }
+
+  // 皮肤作者调心情用：在开发者工具里输入 baibaoMascot('开心')
+  window.baibaoMascot = mood => mascotMood(String(mood || '待机'));
+  window.baibaoMascot.live2d = () => l2d.model;
+
   function mcSay(text, ms = 4000) {
     const bub = $('#mascot .mc-bubble');
     if (!bub || !mc.cfg) return;
@@ -3643,6 +3798,14 @@
   function mascotMood(mood) {
     if (!mc.cfg) return;
     const box = $('#mascot');
+    if (l2d.model) {
+      mc.mood = mood;
+      box.dataset.mood = mood;
+      l2dMood(mood);
+      clearTimeout(mc.backT);
+      if (!['待机', '思考', '困', '玩游戏'].includes(mood)) mc.backT = setTimeout(() => { if (mc.mood === mood) mascotMood('待机'); }, mood === '说话' ? 30000 : 9000);
+      return;
+    }
     const src = mcSrc(mood);
     const imgs = box.querySelectorAll('.mc-img');
     const front = [...imgs].find(i => i.classList.contains('on')) || imgs[0];
@@ -3666,7 +3829,7 @@
   function mcBlinkLoop() {
     clearTimeout(mc.blinkT);
     mc.blinkT = setTimeout(() => {
-      if (!mc.cfg) return;
+      if (!mc.cfg || l2d.model) return;
       const closed = mc.cfg.images['待机-闭眼'];
       const front = $('#mascot .mc-img.on');
       if (closed && mc.mood === '待机' && front && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -3691,7 +3854,7 @@
   setInterval(() => {
     if (!mc.cfg || document.hidden) return;
     const idle = Date.now() - mc.lastAct;
-    if (idle > 240000 && mc.mood !== '玩游戏' && mc.cfg.images['玩游戏']) mascotMood('玩游戏');
+    if (idle > 240000 && mc.mood !== '玩游戏' && (mc.cfg.images['玩游戏'] || (l2d.model && mc.cfg.live2d.moods['玩游戏']))) mascotMood('玩游戏');
     else if (idle > 90000 && mc.mood === '待机') { mascotMood('困'); mcSay('……有点困了。', 3500); }
   }, 10000);
   $('#mascot').addEventListener('click', e => {

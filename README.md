@@ -52,7 +52,7 @@
 **其他**
 - **AI 管家**：接上 DeepSeek、通义千问等 AI，她会自己翻你的资料回答并标出处；还能听吩咐做事，比如"帮我看看昨天存的资料讲了什么""打开记账本""把这些放进学习活页"；名字和性格可以自己定
 - **截图识字**（Windows）：框选屏幕上的字，自动复制好
-- **皮肤**：自带原皮、极简、二次元、星空四套（星空会动：星星旋转、流星划过，常用的工具更亮），也能把 `.bbskin` 皮肤文件拖进来安装；皮肤还可以带一个会呼吸、眨眼、跟着问问换动作的**看板娘**
+- **皮肤**：自带原皮、极简、二次元、星空四套（星空会动：星星旋转、流星划过，常用的工具更亮），也能把 `.bbskin` 皮肤文件拖进来安装；皮肤还可以带一个会呼吸、眨眼、跟着问问换动作的**看板娘**（立绘或 Live2D 模型）
 - **桌面版**：独立窗口，托盘常驻，全局快捷键，开机自启
 - **小更新包**：以后升级只需把几 MB 的 `.bbupdate` 拖进窗口
 
@@ -156,6 +156,8 @@ npm run build          # 打包到 dist/：网页版、桌面版、小更新包
 - [PDF.js](https://github.com/mozilla/pdf.js)（`lib/pdfjs/`）：Apache-2.0
 - [站酷快乐体](https://fonts.google.com/specimen/ZCOOL+KuaiLe)（`public/skins/anime/fonts/`，二次元皮肤用）：SIL Open Font License 1.1
 - 桌面版基于 [Electron](https://www.electronjs.org)：MIT
+- [PixiJS](https://github.com/pixijs/pixijs)、[pixi-live2d-display](https://github.com/guansss/pixi-live2d-display)（`public/vendor/`，Live2D 看板娘用）：MIT；其中的 Live2D Cubism Framework 为 Live2D Open Software License
+- Live2D Cubism Core 是 Live2D 公司的专有软件，不在仓库里；用到 Live2D 看板娘时从 Live2D 官网下载，须遵守 [Live2D Proprietary Software License](https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html)
 
 ---
 
