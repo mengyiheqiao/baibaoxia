@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.19.0';
+const VERSION = '0.20.0';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -812,6 +812,117 @@ function makeSnippet(text, word) {
   return (j > 30 ? '…' : '') + plain.slice(Math.max(0, j - 30), j + 60) + (j + 60 < plain.length ? '…' : '');
 }
 
+// ---- PDF 批注（0.20）：百宝匣先把批注存在 记忆区/批注/<文件名>.json（快、能同步、能搜），
+// 再用增量更新写进 PDF 文件本身，别人用别的阅读器打开也能看到
+const pdfwrite = require('./lib/pdfwrite.js');
+const ANNOT_COLORS = new Set(Object.keys(pdfwrite.COLORS));
+const annotDir = d => path.join(d.root, '批注');
+const annotFile = (d, name) => path.join(annotDir(d), name + '.json');
+function readAnnots(d, name) {
+  try {
+    const j = JSON.parse(fs.readFileSync(annotFile(d, name), 'utf8'));
+    return { items: Array.isArray(j.items) ? j.items : [], rev: Number(j.rev) || 0, wrote: j.wrote || null, writeToFile: j.writeToFile !== false, exported: j.exported || null };
+  } catch { return { items: [], rev: 0, wrote: null, writeToFile: true, exported: null }; }
+}
+function writeAnnots(d, name, a) {
+  fs.mkdirSync(annotDir(d), { recursive: true });
+  const f = annotFile(d, name);
+  fs.writeFileSync(f + '.tmp', JSON.stringify({ v: 1, file: name, rev: a.rev, writeToFile: a.writeToFile, wrote: a.wrote, exported: a.exported || null, items: a.items }, null, 1), 'utf8');
+  fs.renameSync(f + '.tmp', f);
+}
+// 页面发来的批注：只留认得的字段，数字都检查一遍
+function cleanAnnot(it) {
+  if (!it || typeof it !== 'object') return null;
+  const id = String(it.id || '');
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return null;
+  const type = ['highlight', 'note', 'ink'].includes(it.type) ? it.type : null;
+  const page = Number(it.page);
+  if (!type || !Number.isInteger(page) || page < 1 || page > 100000) return null;
+  const fin = v => Number.isFinite(Number(v));
+  const out = { id, type, page, color: ANNOT_COLORS.has(it.color) ? it.color : 'yellow', created: Number(it.created) || Date.now(), updated: Number(it.updated) || Date.now() };
+  if (it.note) out.note = String(it.note).slice(0, 10000);
+  if (type === 'highlight') {
+    out.rects = (Array.isArray(it.rects) ? it.rects : []).filter(r => Array.isArray(r) && r.length === 4 && r.every(fin)).slice(0, 300).map(r => r.map(Number));
+    if (!out.rects.length) return null;
+    out.text = String(it.text || '').slice(0, 3000);
+  }
+  if (type === 'note') {
+    if (!Array.isArray(it.at) || it.at.length !== 2 || !it.at.every(fin)) return null;
+    out.at = it.at.map(Number);
+  }
+  if (type === 'ink') {
+    out.paths = (Array.isArray(it.paths) ? it.paths : []).slice(0, 300)
+      .map(pth => (Array.isArray(pth) ? pth : []).filter(pt => Array.isArray(pt) && pt.length === 2 && pt.every(fin)).slice(0, 5000).map(pt => pt.map(Number)))
+      .filter(pth => pth.length);
+    if (!out.paths.length) return null;
+    out.width = Math.min(12, Math.max(0.5, Number(it.width) || 2));
+    if (Array.isArray(it.box) && it.box.length === 4 && it.box.every(fin)) out.box = it.box.map(Number);
+  }
+  return out;
+}
+// 写进 PDF：同一个文件同时只写一次
+const annotLocks = new Map();
+function flushAnnots(d, name, { force = false } = {}) {
+  const key = d.root + '|' + name;
+  const prev = annotLocks.get(key) || Promise.resolve();
+  const job = prev.catch(() => {}).then(() => {
+    const file = safeJoin(d.files, name);
+    if (!file || !fs.existsSync(file)) return { ok: false, message: '找不到这个文件。' };
+    const a = readAnnots(d, name);
+    if (!a.writeToFile && !force) return { ok: true, wrote: false, skipped: true };
+    if (!force && a.wrote && a.wrote.rev === a.rev && !a.wrote.error) return { ok: true, wrote: false, upToDate: true };
+    try {
+      const buf = fs.readFileSync(file);
+      const r = pdfwrite.buildUpdate(buf, a.writeToFile ? a.items : []);
+      if (r.appendix.length) {
+        releaseHandles(file);
+        if (fs.statSync(file).size !== buf.length) throw new Error('文件刚刚被改过，等会儿再写');
+        fs.appendFileSync(file, r.appendix);
+      }
+      a.wrote = { rev: a.rev, at: Date.now(), size: buf.length + r.appendix.length };
+      writeAnnots(d, name, a);
+      ourIdsCache.delete(file);
+      return { ok: true, wrote: r.appendix.length > 0, count: r.written };
+    } catch (e) {
+      a.wrote = { rev: a.wrote ? a.wrote.rev : -1, at: Date.now(), error: String(e.message || e) };
+      writeAnnots(d, name, a);
+      return { ok: false, message: '批注存在百宝匣里了，但没能写进 PDF 文件：' + (e.message || e) };
+    }
+  });
+  annotLocks.set(key, job);
+  job.finally(() => { if (annotLocks.get(key) === job) annotLocks.delete(key); });
+  return job;
+}
+const annotTimers = new Map();
+function scheduleFlush(d, name, ms = 20000) {
+  const key = d.root + '|' + name;
+  clearTimeout(annotTimers.get(key));
+  annotTimers.set(key, setTimeout(() => { annotTimers.delete(key); flushAnnots(d, name).catch(() => {}); }, ms));
+}
+// 文件里哪些批注是百宝匣写的（页面显示别的软件做的批注时要跳过它们）
+const ourIdsCache = new Map();
+function ourAnnotIds(file) {
+  const st = safeStat(file);
+  if (!st) return [];
+  const c = ourIdsCache.get(file);
+  if (c && c.size === st.size && c.mtime === st.mtimeMs) return c.ids;
+  let ids = [];
+  try { ids = pdfwrite.ourAnnotIds(fs.readFileSync(file)); } catch {}
+  ourIdsCache.set(file, { size: st.size, mtime: st.mtimeMs, ids });
+  return ids;
+}
+// 所有 PDF 的批注，给搜索、问问用
+function allAnnots(d) {
+  const out = [];
+  let names = [];
+  try { names = fs.readdirSync(annotDir(d)).filter(n => n.endsWith('.json')); } catch { return out; }
+  for (const n of names) {
+    const name = n.slice(0, -5);
+    for (const it of readAnnots(d, name).items) if (it.note || it.text) out.push({ file: name, ...it });
+  }
+  return out;
+}
+
 function search(q, d) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return { notes: [], files: { byName: [], byContent: [] } };
@@ -856,7 +967,15 @@ function search(q, d) {
   }
   byContent.sort((a, b) => b.total - a.total);
   const pending = all.filter(f => f.indexed === 'pending').length;
-  return { notes, files: { byName, byContent, pending } };
+  // 批注里有：自己写的便签、划过的句子
+  const annots = [];
+  for (const a of allAnnots(d)) {
+    const t = ((a.note || '') + ' ' + (a.text || '')).toLowerCase();
+    if (!words.every(w => t.includes(w))) continue;
+    annots.push({ file: a.file, page: a.page, id: a.id, color: a.color, note: a.note || '', text: (a.text || '').slice(0, 200), updated: a.updated });
+  }
+  annots.sort((x, y) => y.updated - x.updated);
+  return { notes, files: { byName, byContent, pending }, annots: annots.slice(0, 30) };
 }
 
 // ---- 活页：记忆区最上面那一叠带标签的活页，用来整理说明和资料
@@ -1718,6 +1837,9 @@ function retrieve(question, d, limit = 6) {
         chunks.push({ kind: 'file', name: f.name, title: f.name, label: part.label, page: part.page, chapter: part.chapter, text: part.text.slice(i, i + 1600) });
       }
     }
+  }
+  for (const a of allAnnots(d)) {
+    chunks.push({ kind: 'file', name: a.file, title: a.file, label: `第 ${a.page} 页 · 你的批注`, page: a.page, text: (a.text ? `划线：${a.text}\n` : '') + (a.note ? `我的便签：${a.note}` : '') });
   }
   for (const c of chunks) {
     const lower = (c.title + ' ' + c.text).toLowerCase();
@@ -2810,6 +2932,57 @@ const server = http.createServer(async (req, res) => {
       if (space === 'main') recordAction('新建');
       return send(res, 200, { ok: true, id });
     }
+    // ---- PDF 批注
+    if (p.startsWith('/api/pdfnotes')) {
+      const d = spaceDirs(space);
+      const name = String(url.searchParams.get('name') || '');
+      const file = safeJoin(d.files, name);
+      if (!name || !file || path.dirname(file) !== d.files || !/\.pdf$/i.test(name) || !fs.existsSync(file)) return send(res, 200, { ok: false, message: '找不到这个 PDF。' });
+      if (p === '/api/pdfnotes' && req.method === 'GET') {
+        const a = readAnnots(d, name);
+        return send(res, 200, { ok: true, items: a.items, rev: a.rev, writeToFile: a.writeToFile, wrote: a.wrote, exported: a.exported, ours: ourAnnotIds(file) });
+      }
+      if (p === '/api/pdfnotes' && req.method === 'PUT') {
+        const body = await readJson(req);
+        const a = readAnnots(d, name);
+        const seen = new Set();
+        if (body.exported && typeof body.exported === 'object') {
+          a.exported = { note: cleanName(String(body.exported.note || '')), at: Number(body.exported.at) || Date.now(), ids: (Array.isArray(body.exported.ids) ? body.exported.ids : []).map(String).slice(0, 5000) };
+          if (!Array.isArray(body.items)) { writeAnnots(d, name, a); return send(res, 200, { ok: true, rev: a.rev }); }
+        }
+        a.items = (Array.isArray(body.items) ? body.items : []).map(cleanAnnot).filter(x => x && !seen.has(x.id) && seen.add(x.id)).slice(0, 5000);
+        a.rev += 1;
+        writeAnnots(d, name, a);
+        if (a.writeToFile || (a.wrote && !a.wrote.error)) scheduleFlush(d, name);
+        return send(res, 200, { ok: true, rev: a.rev });
+      }
+      if (p === '/api/pdfnotes/flush' && req.method === 'POST') {
+        return send(res, 200, await flushAnnots(d, name));
+      }
+      if (p === '/api/pdfnotes/settings' && req.method === 'POST') {
+        const body = await readJson(req);
+        const a = readAnnots(d, name);
+        a.writeToFile = body.writeToFile !== false;
+        a.rev += 1; // 关掉时也要写一次：把文件里百宝匣写过的拿掉
+        writeAnnots(d, name, a);
+        const r = await flushAnnots(d, name, { force: !a.writeToFile });
+        return send(res, 200, { ...r, writeToFile: a.writeToFile });
+      }
+      if (p === '/api/pdfnotes/export' && req.method === 'GET') {
+        // 另存一份带批注的 PDF（原文件不动）
+        try {
+          const buf = fs.readFileSync(file);
+          const r = pdfwrite.buildUpdate(buf, readAnnots(d, name).items);
+          const out = Buffer.concat([buf, r.appendix]);
+          const dl = name.replace(/\.pdf$/i, '') + '（带批注）.pdf';
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': out.length, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(dl)}`, 'Cache-Control': 'no-store' });
+          return res.end(out);
+        } catch (e) {
+          return send(res, 200, { ok: false, message: '没能生成带批注的 PDF：' + (e.message || e) });
+        }
+      }
+      return send(res, 404, { error: '找不到' });
+    }
     if (p === '/api/files/open' && req.method === 'POST') {
       const d = spaceDirs(space);
       const body = await readJson(req);
@@ -2993,6 +3166,7 @@ const server = http.createServer(async (req, res) => {
       releaseHandles(file);
       fs.renameSync(file, path.join(d.files, nn));
       try { fs.renameSync(indexPath(d, name), indexPath(d, nn)); } catch {}
+      try { fs.renameSync(annotFile(d, name), annotFile(d, nn)); } catch {}
       binderRename(d, 'file', name, nn);
       return send(res, 200, { ok: true, name: nn });
     }

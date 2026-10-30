@@ -1003,3 +1003,134 @@ body.has-mascot .butler-face { display: none; }
 #mascot.l2d .mc-body, #mascot.l2d[data-mood] .mc-body { animation: none; }
 #mascot.l2d.mc-hop .mc-body { animation: mc-hop .55s cubic-bezier(.3, 1.4, .5, 1); }
 #mascot.l2d.mc-shake .mc-body { animation: mc-shake .4s ease-out; }
+
+/* ---------------------------------------------------------------- PDF 阅读器（0.20）：便签贴在书旁边 */
+:root {
+  --hl-yellow: rgba(255, 214, 90, .5); --hl-green: rgba(127, 220, 166, .5); --hl-blue: rgba(126, 178, 255, .45); --hl-pink: rgba(255, 150, 190, .45);
+  --ink-red: #e5484d; --ink-blue: #2f6fe0; --ink-black: #23262f; --ink-green: #2f9e5f; --ink-yellow: #e0a800; --ink-pink: #e0559a;
+  --pv-desk: color-mix(in srgb, var(--page) 88%, var(--ink) 12%);
+}
+.c-yellow { --c: var(--ink-yellow); --h: var(--hl-yellow); }
+.c-green { --c: var(--ink-green); --h: var(--hl-green); }
+.c-blue { --c: var(--ink-blue); --h: var(--hl-blue); }
+.c-pink { --c: var(--ink-pink); --h: var(--hl-pink); }
+.c-red { --c: var(--ink-red); --h: rgba(229, 72, 77, .35); }
+.c-black { --c: var(--ink-black); --h: rgba(35, 38, 47, .25); }
+.hl-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: var(--c, var(--brass)); vertical-align: middle; }
+
+#view-pdf:not([hidden]) { display: grid; grid-template-rows: auto auto 1fr; height: calc(100vh - 120px); gap: 8px; position: relative; }
+.pv-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pv-name { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.pv-name strong { font: 600 16px var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.2em; }
+.pv-status.bad { color: var(--lamp-err); }
+.pv-find input { width: 200px; height: 32px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 0 12px; font: inherit; font-size: 13px; }
+.pv-pageno { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.pv-pageno input { width: 3.2em; text-align: center; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.pv-bar [aria-pressed="true"] { background: color-mix(in srgb, var(--brass) 18%, transparent); border-color: var(--brass); }
+.pv-count { font-size: 12px; color: var(--muted); }
+.pv-inkbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+.pv-inkbar[hidden] { display: none; }
+.pv-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; background: var(--c); cursor: pointer; padding: 0; box-shadow: 0 0 0 1px rgba(0,0,0,.12) inset; }
+.pv-dot.cur { border-color: var(--ink); }
+.pv-w { width: 30px; height: 24px; border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; display: grid; place-items: center; }
+.pv-w i { display: block; width: 18px; background: var(--ink); border-radius: 3px; }
+.pv-w.cur { border-color: var(--brass); }
+
+.pv-scroll { overflow: auto; background: var(--pv-desk); border-radius: 10px; border: 1px solid var(--line); position: relative; outline: none; }
+.pv-wrap { position: relative; margin: 20px auto 40px; }
+.pv-pages { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.pv-page { position: relative; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18), 0 6px 18px rgba(0,0,0,.08); flex: none; }
+.pv-num { position: absolute; inset: 0; display: grid; place-items: center; color: #b9b9b9; font: 28px var(--serif); }
+.pv-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pv-marks { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
+.pv-hl { position: absolute; background: var(--h, var(--c)); border-radius: 2px; }
+.pv-hl.line { background: transparent; border-bottom: 2px solid var(--c); opacity: .9; }
+.pv-hl[style*="--c:rgb"]:not(.line) { background: var(--c); opacity: .35; }
+.pv-hl.on, .pv-hl.hot { box-shadow: 0 0 0 2px var(--c); }
+.pv-top { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.pv-inksvg { position: absolute; inset: 0; overflow: visible; }
+.pv-ink { fill: none; stroke: var(--c); stroke-linecap: round; stroke-linejoin: round; }
+.pv-ink.on, .pv-ink.hot { filter: drop-shadow(0 0 3px var(--c)); }
+.pv-pin { position: absolute; width: 18px; height: 18px; margin: 0; padding: 0; border: 0; border-radius: 4px 4px 4px 0; background: var(--c); box-shadow: 0 1px 3px rgba(0,0,0,.3); pointer-events: auto; cursor: pointer; }
+.pv-pin::after { content: ""; position: absolute; left: 4px; right: 4px; top: 5px; height: 2px; background: rgba(255,255,255,.85); box-shadow: 0 4px 0 rgba(255,255,255,.85); }
+.pv-pin.on, .pv-pin.hot { outline: 2px solid var(--ink); outline-offset: 1px; }
+.pv-capture { position: absolute; inset: 0; z-index: 4; display: none; cursor: crosshair; touch-action: none; }
+.pv-inking .pv-capture { display: block; }
+.pv-inking .textLayer { pointer-events: none; }
+
+/* PDF.js 文字层：透明的字，叠在画面上，用来选中和复制 */
+.textLayer { position: absolute; text-align: initial; inset: 0; overflow: clip; opacity: 1; line-height: 1; text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; caret-color: CanvasText; z-index: 2; }
+.textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) { z-index: 1; }
+.textLayer span.markedContent { top: 0; height: 0; }
+.textLayer ::selection { background: rgba(45, 111, 209, .28); }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
+.textLayer span.pv-hit { background: rgba(255, 140, 0, .35); border-radius: 2px; }
+
+/* 便签栏 */
+.pv-side { position: absolute; top: 0; bottom: 0; }
+.pv-links { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.pv-links path { fill: none; stroke: var(--c, var(--brass)); stroke-width: 1; stroke-dasharray: 3 3; opacity: .55; }
+.pv-links path.on { stroke-width: 1.6; stroke-dasharray: none; opacity: .95; }
+.pv-card { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--h, #fff6c2) 30%, #fffdf6); color: #2b2a26; border-radius: 4px 10px 10px 4px; box-shadow: 0 1px 2px rgba(0,0,0,.14), 0 4px 12px rgba(0,0,0,.08); border-left: 4px solid var(--c, var(--brass)); transition: top .15s ease; font-size: 14px; }
+.pv-card.on { box-shadow: 0 0 0 1.5px var(--c), 0 6px 18px rgba(0,0,0,.16); z-index: 2; }
+.pv-card.hot { box-shadow: 0 0 0 1px var(--c), 0 6px 16px rgba(0,0,0,.14); }
+.pv-card.foreign { background: #f4f4f2; }
+.pv-cardin { padding: 6px 10px 8px; }
+.pv-cardhead { display: flex; align-items: center; font-size: 11px; color: #8a877e; }
+.pv-cardhead span { flex: 1; }
+.pv-x { border: 0; background: transparent; color: inherit; font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px; border-radius: 4px; opacity: .55; }
+.pv-x:hover { opacity: 1; background: rgba(0,0,0,.06); }
+.pv-quote { font: 12px/1.6 var(--serif); color: #6c6a62; margin: 2px 0 4px; border-left: 2px solid var(--c); padding-left: 6px; }
+.pv-card textarea { display: block; width: 100%; border: 0; outline: 0; resize: none; background: transparent; color: inherit; font: 14px/1.65 var(--sans); padding: 0; min-height: 1.65em; overflow: hidden; }
+.pv-card textarea::placeholder { color: #a7a397; }
+.pv-ro { white-space: pre-wrap; line-height: 1.65; }
+.pv-by { font-size: 11px; color: #8a877e; margin-top: 4px; }
+.pv-tabtext { display: none; }
+.pv-card.tab { right: auto; max-width: 150px; cursor: pointer; border-radius: 3px 8px 8px 3px; }
+.pv-card.tab .pv-cardin { display: none; }
+.pv-card.tab .pv-tabtext { display: block; padding: 3px 8px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #55534b; }
+.pv-folded .pv-card.tab { width: 30px; max-width: 30px; height: 22px; }
+.pv-folded .pv-card.tab .pv-tabtext { visibility: hidden; }
+.pv-folded .pv-card.on, .pv-folded .pv-card:not(.tab) { left: auto; right: 0; width: 260px; }
+
+/* 浮动工具条 */
+.pv-float { position: fixed; z-index: 60; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 6px 22px rgba(0,0,0,.18); }
+.pv-float[hidden] { display: none; }
+.pv-float button:not(.pv-dot) { border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.pv-float button:not(.pv-dot):hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.pv-float .danger { color: var(--lamp-err); }
+.pv-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
+
+.pv-found, .pv-list, .pv-menu { position: absolute; z-index: 20; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.18); color: var(--ink); }
+.pv-found { top: 48px; right: 220px; width: min(420px, 90vw); max-height: 60vh; overflow: auto; padding: 8px; }
+.pv-foundh, .pv-listh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 8px; font-size: 13px; color: var(--muted); }
+.pv-hitrow { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1.6; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.pv-hitrow:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.pv-hitrow b { color: var(--muted); font-weight: 500; margin-right: 4px; }
+.pv-found mark, .hit mark { background: color-mix(in srgb, var(--brass) 40%, transparent); color: inherit; }
+.pv-list { top: 48px; right: 0; bottom: 0; width: min(360px, 92vw); overflow: auto; padding: 10px 12px; }
+.pv-list h4 { margin: 14px 4px 6px; font: 500 13px var(--serif); color: var(--muted); }
+.pv-li { display: block; width: 100%; text-align: left; border: 0; border-left: 4px solid var(--c); background: color-mix(in srgb, var(--ink) 4%, transparent); color: inherit; font: inherit; padding: 8px 10px; margin-bottom: 6px; border-radius: 4px 8px 8px 4px; cursor: pointer; }
+.pv-li:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+.pv-li span { display: block; }
+.pv-li .k { font-size: 11px; color: var(--muted); }
+.pv-li .q { font: 13px/1.7 var(--serif); }
+.pv-li .n { font-size: 13px; line-height: 1.65; margin-top: 2px; white-space: pre-wrap; color: color-mix(in srgb, var(--c) 55%, var(--ink)); }
+.pv-menu { top: 48px; right: 0; width: 300px; padding: 6px; display: flex; flex-direction: column; }
+.pv-menu > button, .pv-menu > a { text-align: left; border: 0; background: transparent; color: inherit; font: inherit; font-size: 14px; padding: 9px 12px; border-radius: 8px; cursor: pointer; text-decoration: none; }
+.pv-menu > button:hover, .pv-menu > a:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
+.pv-check { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 9px 12px; font-size: 14px; cursor: pointer; }
+.pv-check small { grid-column: 2; color: var(--muted); font-size: 12px; }
+.pv-menu .sub { font-size: 12px; color: var(--muted); padding: 6px 12px; margin: 4px 0 0; border-top: 1px solid var(--line); line-height: 1.6; }
+.pv-found[hidden], .pv-list[hidden], .pv-menu[hidden] { display: none; }
+.pv-fail { padding: 60px 20px; text-align: center; color: var(--muted); }
+@media (max-width: 760px) {
+  #view-pdf:not([hidden]) { height: calc(100vh - 150px); }
+  .pv-find input { width: 130px; }
+  .pv-found { right: 8px; }
+}
+@media (max-width: 1100px) { .pv-find input { width: 140px; } .pv-bar .btn { padding-left: 10px; padding-right: 10px; } }

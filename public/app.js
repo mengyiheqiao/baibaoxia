@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.19.0';
+  const APP_VERSION = '0.20.0';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -89,10 +89,11 @@
 
   function setView(v, { push = true } = {}) {
     state.view = v;
-    for (const id of ['tools', 'memory', 'search', 'reader']) $('#view-' + id).hidden = id !== v;
+    for (const id of ['tools', 'memory', 'search', 'reader', 'pdf']) $('#view-' + id).hidden = id !== v;
     if (v !== 'reader' && state.reader) { state.reader = null; $('#rd-frame').src = 'about:blank'; }
+    if (v !== 'pdf' && window.bbPdf && window.bbPdf.current) window.bbPdf.close();
     document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.view === v)));
-    if (push && v !== 'search' && v !== 'reader') {
+    if (push && v !== 'search' && v !== 'reader' && v !== 'pdf') {
       const h = v === 'memory' && state.note ? `#memory/${encodeURIComponent(state.note.id)}` : `#${v}`;
       if (location.hash !== h) history.replaceState(null, '', h);
     }
@@ -3038,8 +3039,8 @@
     const fr = r.files || {};
     const byName = fr.byName || [];
     const byContent = fr.byContent || [];
-    firstHit = tools[0] || notes[0] || byName[0] || byContent[0] || null;
-    recordSearch(q, tools.length + notes.length + byName.length + byContent.length);
+    firstHit = tools[0] || notes[0] || byName[0] || (r.annots || [])[0] || byContent[0] || null;
+    recordSearch(q, tools.length + notes.length + byName.length + byContent.length + (r.annots || []).length);
     let first = true;
     const mark = () => { const c = first ? ' first' : ''; first = false; return c; };
     let html = '';
@@ -3062,6 +3063,14 @@
         const c = mark();
         return `<button class="hit${c}" data-file="${esc(f.name)}"><span class="g">${fileGlyph(f.name)}</span>
           <span><span class="t">${highlight(f.name, words)}</span><br><span class="s">${fmtSize(f.size)}</span></span>${c ? '<kbd>回车打开</kbd>' : ''}</button>`;
+      }).join('');
+    }
+    const annots = r.annots || [];
+    if (annots.length) {
+      html += '<h2>批注里有</h2>' + annots.map(a => {
+        const c = mark();
+        return `<button class="hit${c}" data-pdf-note="${esc(a.id)}" data-file="${esc(a.file)}" data-page="${a.page}"><span class="g"><i class="hl-dot c-${esc(a.color)}"></i></span>
+          <span><span class="s">${esc(a.file)} · 第 ${a.page} 页</span><br><span class="t">${a.note ? highlight(a.note.slice(0, 160), words) : highlight(a.text, words)}</span>${a.note && a.text ? `<br><span class="s">划的是：${highlight(a.text.slice(0, 80), words)}</span>` : ''}</span>${c ? '<kbd>回车打开</kbd>' : ''}</button>`;
       }).join('');
     }
     if (byContent.length) {
@@ -3099,6 +3108,7 @@
     const fl = e.target.closest('[data-file]');
     if (t) launchTool(t.dataset.tool);
     if (n) { $('#q').value = ''; openNote(n.dataset.note); }
+    if (fl && fl.dataset.pdfNote && window.bbPdf) { $('#q').value = ''; return window.bbPdf.open(fl.dataset.file, { focus: fl.dataset.pdfNote, page: Number(fl.dataset.page) }); }
     if (fl) {
       openFile(fl.dataset.file, {
         page: fl.dataset.page ? Number(fl.dataset.page) : null,
@@ -3135,9 +3145,12 @@
   function openFile(name, { page = null, chapter = null, word = '', para = null, sheet = null } = {}) {
     if (/\.epub$/i.test(name)) return openReader(name, { chapter, word });
     if (OFFICE_RE.test(name)) return openOffice(name, { page, para, sheet, word });
-    let url = fileUrl(name);
-    if (/\.pdf$/i.test(name) && page) url += `#page=${page}`;
-    window.open(url, '_blank', 'noopener');
+    if (/\.pdf$/i.test(name) && window.bbPdf) {
+      if (state.editing && !confirmLeave()) return;
+      $('#q').value = '';
+      return window.bbPdf.open(name, { page, word });
+    }
+    window.open(fileUrl(name), '_blank', 'noopener');
   }
 
   // ---------------------------------------------------------------- 皮肤
@@ -4537,11 +4550,18 @@
       const ch = Number(parts.pop());
       history.replaceState(null, '', '#memory');
       openReader(parts.join('/'), { chapter: Number.isFinite(ch) ? ch : null });
+    } else if (h.startsWith('pdf/')) {
+      const parts = h.slice(4).split('/');
+      const pg = /^\d+$/.test(parts[parts.length - 1]) ? Number(parts.pop()) : null;
+      openFile(parts.join('/'), { page: pg });
     } else if (h.startsWith('memory/')) openNote(h.slice(7));
     else if (h === 'memory') setView('memory');
     else setView('tools');
   }
   window.addEventListener('hashchange', route);
+
+  // 给 PDF 阅读器（pdfview.js）用的
+  window.bbx = { api, toast, ask, state, setView, openNote, openChat, loadPdfjs, fileUrl, uploadFile, butlerName };
 
   (async function init() {
     await initDesktop();

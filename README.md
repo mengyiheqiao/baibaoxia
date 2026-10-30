@@ -34,6 +34,7 @@
 - Markdown 说明，粘贴截图直接插进去
 - **活页**：像夹子里带彩色标签的分隔页，拖进去就分好类；可以钉住、置顶、收进档案盒，整张导出发给别人
 - 拖进 PDF、EPUB 电子书、Word / Excel / PPT，在百宝匣里就能看，里面的字都能搜
+- **PDF 批注**：选中文字划线、贴便签，便签贴在书页旁边，还能手写；批注写进 PDF 文件本身，别人用 Edge、WPS 打开也能看到，搜索和问问都能读到你写的便签
 - **PDF 转成说明**：文字和图片一起变成一篇能直接修改的笔记
 - 电子书阅读器：划线、笔记、书签，能导出成读书笔记
 - **网页剪藏**：装上浏览器插件，选中文字点一下就存进来
@@ -166,7 +167,7 @@ npm run build          # 打包到 dist/：网页版、桌面版、小更新包
 **百宝匣 (Baibaoxia, "treasure box")** is a local-first personal toolbox and knowledge base for Windows (the web version also runs on macOS and Linux).
 
 - **Tools**: one-click launchers for websites, folders, programs and local projects. It can start a local server, wait until it is ready, then open it. Also supports multi-step "combos", importing projects from GitHub and health checks.
-- **Memory**: Markdown notes, PDFs, EPUBs and Word / Excel / PPT files, all full-text searchable and organized with colored binder tabs. A "pocket" for quick files can sync end-to-end encrypted through your own private GitHub repo, with a temporary mode for public computers. Includes a web-clipper browser extension, an EPUB reader with highlights, optional AI Q&A over your own notes, skins and a desktop app built on Electron.
+- **Memory**: Markdown notes, PDFs, EPUBs and Word / Excel / PPT files, all full-text searchable and organized with colored binder tabs. A "pocket" for quick files can sync end-to-end encrypted through your own private GitHub repo, with a temporary mode for public computers. Includes a web-clipper browser extension, an EPUB reader with highlights, a PDF reader with margin sticky notes and ink (annotations are written into the PDF itself), optional AI Q&A over your own notes, skins and a desktop app built on Electron.
 
 Everything stays on your computer, and the server listens only on 127.0.0.1. The UI is in Chinese.
 
