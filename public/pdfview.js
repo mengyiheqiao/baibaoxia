@@ -15,6 +15,7 @@
   const GAP = 18;         // 页与页之间
   const SIDE = 280;       // 便签栏宽
   const SIDE_MIN = 36;    // 收起时
+  const WIDE = 420;       // 展开宽一点的便签
   const FAR = 150;        // 被挤开超过这么远就收成小标签
   let S = null;           // 当前打开的这份
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -391,48 +392,76 @@
 
   const hasCard = it => it.type === 'note' || !!it.note || S.editing === it.id;
 
+  // 便签栏：卡片按原文的高度对齐，挤不下往下推；已有的卡片原地更新，正在打字的那张绝不重建（不然输入法打到一半会丢字）
+  const dyOf = it => (it.foreign ? (S.fdy && S.fdy[it.id]) : it.dy) || 0;
   function layoutNotes() {
     if (!S || !S.pages.length) return;
     const side = $('#pv-side');
     const cards = allItems().filter(hasCard).map(it => ({ it, a: anchorOf(it) })).filter(c => c.a);
-    cards.sort((p, q) => p.a.y - q.a.y || p.a.x - q.a.x);
-    // 先放卡片量高度，再从上往下排，挤不下的往下推
-    side.innerHTML = cards.map(({ it }) => cardHtml(it)).join('');
-    const els = [...side.children];
+    cards.forEach(c => { c.want = c.a.y - 10 + dyOf(c.it); });
+    cards.sort((p, q) => p.want - q.want || p.a.x - q.a.x);
+    const keep = new Map([...side.children].map(el => [el.dataset.id, el]));
+    const els = cards.map(({ it }) => {
+      let el = keep.get(it.id);
+      keep.delete(it.id);
+      const sig = cardSig(it);
+      const typing = el && el.contains(document.activeElement) && document.activeElement.tagName === 'TEXTAREA';
+      if (!el || (el.dataset.sig !== sig && !typing)) {
+        const t = document.createElement('div');
+        t.innerHTML = cardHtml(it);
+        const n = t.firstElementChild;
+        if (el) el.replaceWith(n); else side.appendChild(n);
+        el = n;
+      }
+      el.dataset.sig = sig;
+      el.className = cardClass(it);
+      return el;
+    });
+    for (const el of keep.values()) el.remove();
     let bottom = -1e9;
     const links = [];
+    // 展开宽一点：右边有空就往右伸，没空就往左压一点在书页边上
+    const sc = $('#pv-scroll');
+    const room = sc.clientWidth - ($('#pv-wrap').offsetLeft + S.pagesW + 24) - 16;
+    const wideW = Math.max(300, Math.min(WIDE, room));
+    const wideL = Math.min(0, room - wideW);
     cards.forEach((c, i) => {
       const el = els[i];
-      const want = c.a.y - 10;
-      let top = Math.max(want, bottom + 8);
       const focus = S.active === c.it.id || S.editing === c.it.id;
+      const top = Math.max(c.want, bottom + 8);
       if (!S.side && !focus) el.classList.add('tab');
-      else if (S.side && top - want > FAR && !focus) el.classList.add('tab');
+      else if (S.side && top - c.want > FAR && !focus && !c.it.wide) el.classList.add('tab');
       el.style.top = top + 'px';
+      if (c.it.wide && S.side) { el.style.width = wideW + 'px'; el.style.left = wideL + 'px'; } else { el.style.width = ''; el.style.left = ''; }
       const h = el.offsetHeight;
       if (S.side || !focus) bottom = top + h;
-      if (S.side && !el.classList.contains('tab')) links.push({ it: c.it, a: c.a, y: top + 16, on: focus });
+      if (S.side && !el.classList.contains('tab')) links.push({ it: c.it, a: c.a, y: top + 16, on: focus, x: c.it.wide ? wideL : 0 });
     });
     drawLinks(links);
     if (S.editing) {
       const ta = side.querySelector(`.pv-card[data-id="${CSS.escape(S.editing)}"] textarea`);
-      if (ta && document.activeElement !== ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+      const busy = document.activeElement && document.activeElement.closest && document.activeElement.closest('input, textarea') && document.activeElement !== ta;
+      if (ta && document.activeElement !== ta && !busy) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
     }
     side.querySelectorAll('textarea').forEach(autoGrow);
   }
 
+  const cardSig = it => JSON.stringify([it.note || '', it.text || '', it.color, it.page, !!it.wide]);
+  const cardClass = it => `pv-card c-${it.color || 'x'}${S.active === it.id || S.editing === it.id ? ' on' : ''}${it.foreign ? ' foreign' : ''}${it.wide ? ' wide' : ''}`;
+
   function cardHtml(it) {
-    const on = S.active === it.id || S.editing === it.id ? ' on' : '';
     const col = it.foreign ? `style="--c:${it.css}"` : '';
-    const quote = it.type === 'highlight' && it.text ? `<div class="pv-quote">${esc(it.text.length > 60 ? it.text.slice(0, 60) + '…' : it.text)}</div>` : '';
+    const quote = it.type === 'highlight' && it.text ? `<div class="pv-quote">${esc(it.text.length > 80 ? it.text.slice(0, 80) + '…' : it.text)}</div>` : '';
     const first = (it.note || '').split('\n')[0] || (it.type === 'note' ? '空便签' : '…');
     const body = it.foreign
       ? `<div class="pv-ro">${esc(it.note)}</div><div class="pv-by">${esc(it.author || '别的阅读器')}的批注 · 只能看</div>`
       : `<textarea rows="1" placeholder="写点什么…" aria-label="便签内容">${esc(it.note || '')}</textarea>`;
-    return `<div class="pv-card c-${it.color || 'x'}${on}${it.foreign ? ' foreign' : ''}" data-id="${esc(it.id)}" ${col}>
+    return `<div class="${cardClass(it)}" data-id="${esc(it.id)}" ${col}>
       <div class="pv-tabtext">${esc(first.slice(0, 16))}</div>
       <div class="pv-cardin">
-        <div class="pv-cardhead"><span>第 ${it.page} 页</span>${it.foreign ? '' : `<button class="pv-x" data-del="${esc(it.id)}" aria-label="删掉这张便签">×</button>`}</div>
+        <div class="pv-cardhead" title="按住这里可以上下拖动"><span class="pv-grip" aria-hidden="true"></span><span class="pv-pg">第 ${it.page} 页</span>
+          <button class="pv-x" data-wide="${esc(it.id)}" aria-label="${it.wide ? '收窄' : '展开宽一点'}" title="${it.wide ? '收窄' : '展开宽一点'}">${it.wide ? '⇤' : '⇥'}</button>
+          ${it.foreign ? '' : `<button class="pv-x" data-del="${esc(it.id)}" aria-label="删掉这张便签" title="删掉">×</button>`}</div>
         ${quote}${body}
       </div></div>`;
   }
@@ -445,11 +474,17 @@
     const sx = S.pagesW + 24;
     svg.innerHTML = links.map(l => {
       const mx = (l.a.x + sx) / 2;
-      return `<path class="${l.on ? 'on ' : ''}c-${l.it.color || 'x'}" ${l.it.foreign ? `style="stroke:${l.it.css}"` : ''} d="M${l.a.x.toFixed(1)} ${l.a.y.toFixed(1)} C${mx} ${l.a.y.toFixed(1)}, ${mx} ${l.y}, ${sx} ${l.y}"/>`;
+      const ex = sx + (l.x || 0);
+      return `<path class="${l.on ? 'on ' : ''}c-${l.it.color || 'x'}" ${l.it.foreign ? `style="stroke:${l.it.css}"` : ''} d="M${l.a.x.toFixed(1)} ${l.a.y.toFixed(1)} C${mx} ${l.a.y.toFixed(1)}, ${mx} ${l.y}, ${ex} ${l.y}"/>`;
     }).join('');
   }
 
-  function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 420) + 'px'; }
+  function autoGrow(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight + 2, 420) + 'px';
+    const c = ta.closest('.pv-card');
+    if (c) c.classList.toggle('long', ta.scrollHeight > 165);
+  }
 
   function updateCount() {
     const n = S.items.filter(it => it.note || it.type !== 'highlight' || it.text).length;
@@ -730,8 +765,48 @@
     setActive(id);
   }
 
+  // 按住便签的标题栏上下拖
+  let drag = null;
+  function dragStart(e) {
+    const head = e.target.closest('.pv-cardhead');
+    if (!head || e.target.closest('button') || e.button !== 0) return false;
+    const el = head.closest('.pv-card');
+    if (!el || el.classList.contains('tab')) return false;
+    const it = allItems().find(x => x.id === el.dataset.id);
+    if (!it) return false;
+    e.preventDefault();
+    head.setPointerCapture && head.setPointerCapture(e.pointerId);
+    drag = { it, el, y0: e.clientY, top0: parseFloat(el.style.top) || 0, moved: false };
+    return true;
+  }
+  function dragMove(e) {
+    const d = e.clientY - drag.y0;
+    if (Math.abs(d) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    drag.el.style.top = drag.top0 + d + 'px';
+    drag.el.classList.add('dragging');
+  }
+  function dragEnd(e) {
+    const g = drag;
+    drag = null;
+    g.el.classList.remove('dragging');
+    if (!g.moved) return;
+    S.dragged = true;
+    setTimeout(() => { if (S) S.dragged = false; }, 50);
+    const it = g.it;
+    // 放在哪就记住它离原文多远；离原文太远就不让了
+    const a = anchorOf(it);
+    const nv = Math.max(-1500, Math.min(1500, Math.round(parseFloat(g.el.style.top) - (a.y - 10))));
+    if (it.foreign) { S.fdy = S.fdy || {}; S.fdy[it.id] = nv; return layoutNotes(); }
+    snapshot();
+    if (Math.abs(nv) < 4) delete it.dy; else it.dy = nv;
+    it.updated = Date.now();
+    changed();
+  }
+
   let ink = null;
   function onPointerDown(e) {
+    if (S && dragStart(e)) return;
     if (!S || S.mode === 'read' || e.button !== 0) return;
     const pt = pagePoint(e);
     if (!pt) return;
@@ -746,6 +821,7 @@
     svg.appendChild(ink.path);
   }
   function onPointerMove(e) {
+    if (drag) return dragMove(e);
     if (!ink) return;
     const b = ink.pg.el.getBoundingClientRect();
     const x = e.clientX - b.left, y = e.clientY - b.top;
@@ -755,7 +831,8 @@
     ink.pts.push([x, y]);
     ink.path.setAttribute('d', ink.pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(''));
   }
-  function onPointerUp() {
+  function onPointerUp(e) {
+    if (drag) return dragEnd(e);
     if (!ink) return;
     const cur = ink;
     ink = null;
@@ -1061,6 +1138,15 @@
     if (fo) { if (innerWidth < 900) $('#pv-list').hidden = true; return focusItem(fo.dataset.focus); }
     const del = t.closest('[data-del]');
     if (del) return removeItem(del.dataset.del);
+    const wd = t.closest('[data-wide]');
+    if (wd) {
+      const it = allItems().find(x => x.id === wd.dataset.wide);
+      if (!it) return;
+      if (it.foreign) { it.wide = !it.wide; return layoutNotes(); }
+      snapshot(); it.wide = !it.wide; it.updated = Date.now();
+      return changed();
+    }
+    if (S.dragged) { S.dragged = false; return; }
     const card = t.closest('.pv-card');
     if (card) {
       const id = card.dataset.id;
@@ -1139,15 +1225,8 @@
   // 打字时卡片长高了，下面的卡片要让开
   function relayoutKeepFocus() {
     if (!S) return;
-    const ta = document.activeElement && document.activeElement.closest && document.activeElement.closest('.pv-card textarea') ? document.activeElement : null;
-    const pos = ta ? [ta.selectionStart, ta.selectionEnd] : null;
-    const id = ta && ta.closest('.pv-card').dataset.id;
-    if (id) S.editing = id;
+    if (S.composing) { clearTimeout(S.relayT); S.relayT = setTimeout(relayoutKeepFocus, 400); return; }
     layoutNotes();
-    if (id) {
-      const n = $(`#pv-side .pv-card[data-id="${CSS.escape(id)}"] textarea`);
-      if (n) { n.focus(); n.setSelectionRange(pos[0], pos[1]); }
-    }
   }
 
   function onFocusOut(e) {
@@ -1209,6 +1288,8 @@
     v.addEventListener('dblclick', onDblClick);
     v.addEventListener('mouseup', onMouseUp);
     v.addEventListener('input', onInput);
+    v.addEventListener('compositionstart', () => { if (S) S.composing = true; });
+    v.addEventListener('compositionend', () => { if (S) S.composing = false; });
     v.addEventListener('focusout', onFocusOut);
     v.addEventListener('mouseover', onHover);
     v.addEventListener('change', e => { if (S && e.target.dataset.pv === 'write') setWrite(e.target.checked); });

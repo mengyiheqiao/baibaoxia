@@ -13,7 +13,7 @@ const { spawn, exec } = require('child_process');
 const CODE = __dirname;
 const ROOT = process.env.BAIBAO_DATA ? path.resolve(process.env.BAIBAO_DATA) : __dirname;
 const DESKTOP = global.baibaoDesktop || null;
-const VERSION = '0.20.1';
+const VERSION = '0.20.2';
 const PORT = Number(process.env.BAIBAO_PORT) || 3456;
 const HOST = '127.0.0.1';
 const TOOLS_FILE = path.join(ROOT, 'tools.json');
@@ -841,6 +841,8 @@ function cleanAnnot(it) {
   const fin = v => Number.isFinite(Number(v));
   const out = { id, type, page, color: ANNOT_COLORS.has(it.color) ? it.color : 'yellow', created: Number(it.created) || Date.now(), updated: Number(it.updated) || Date.now() };
   if (it.note) out.note = String(it.note).slice(0, 10000);
+  if (Number.isFinite(Number(it.dy)) && Number(it.dy)) out.dy = Math.max(-1500, Math.min(1500, Math.round(Number(it.dy))));
+  if (it.wide === true) out.wide = true;
   if (type === 'highlight') {
     out.rects = (Array.isArray(it.rects) ? it.rects : []).filter(r => Array.isArray(r) && r.length === 4 && r.every(fin)).slice(0, 300).map(r => r.map(Number));
     if (!out.rects.length) return null;

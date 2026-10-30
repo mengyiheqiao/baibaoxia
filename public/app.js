@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.20.1';
+  const APP_VERSION = '0.20.2';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
