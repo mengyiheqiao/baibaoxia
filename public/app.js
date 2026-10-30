@@ -1,6 +1,6 @@
 // 百宝匣前端
 (function () {
-  const APP_VERSION = '0.20.0';
+  const APP_VERSION = '0.20.1';
   const OLD_BACKEND = '百宝匣后台还是旧版本，新功能用不了。请关掉黑色窗口（任务管理器里的 node.exe 也结束掉），然后重新双击"启动百宝匣.bat"。';
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -1977,6 +1977,7 @@
     const open = e.target.closest('[data-open]');
     if (open && /\.epub$/i.test(open.dataset.open)) { e.preventDefault(); return openReader(open.dataset.open); }
     if (open && OFFICE_RE.test(open.dataset.open)) { e.preventDefault(); return openOffice(open.dataset.open); }
+    if (open && /\.pdf$/i.test(open.dataset.open) && window.bbPdf) { e.preventDefault(); return openFile(open.dataset.open); }
     const b = e.target.closest('[data-file-act]');
     if (!b) return;
     const name = b.closest('[data-file]').dataset.file;
