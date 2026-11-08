@@ -141,6 +141,12 @@ async function buildDesktop() {
 
 function buildUpdate() {
   console.log('小更新包…');
+  // 小更新包必须签名（lib/update.js）。私钥文件用环境变量 BAIBAO_UPDATE_SIGN_KEY 指定；
+  // 自动发布时来自 GitHub 仓库的 Secrets（UPDATE_SIGN_KEY）。没有私钥就不做，免得发出装不上的包。
+  if (!process.env.BAIBAO_UPDATE_SIGN_KEY) {
+    console.log('  跳过：没有签名私钥（设置环境变量 BAIBAO_UPDATE_SIGN_KEY 指向 update-signing-key.pem）');
+    return null;
+  }
   const buf = updater.build(SRC, { version: VERSION, notes: opt('notes') || '', from: opt('from'), electron: ELECTRON || undefined });
   return save(`Baibaoxia-Update-${VERSION}.bbupdate`, buf);
 }

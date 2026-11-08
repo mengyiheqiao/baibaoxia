@@ -2009,11 +2009,14 @@ function send(res, code, body, type = 'application/json; charset=utf-8') {
 
 // 发文件：支持只要一段（PDF 阅读器会这样要），浏览器中途不要了就马上把文件放开，
 // 读文件出错也不会让百宝匣崩掉（Windows 上开着的文件删不干净，就是因为没放开）
-function sendFile(res, file, req) {
+// untrusted：用户资料、口袋、图标这些别人也能塞进来的文件。网页类文件（html/svg）一律放进沙箱，
+// 里面的脚本不能运行，也碰不到百宝匣的接口
+function sendFile(res, file, req, untrusted = false) {
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, { error: '找不到' });
     const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
     const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' };
+    if (untrusted && /^(text\/html|image\/svg|application\/octet-stream)/.test(type)) headers['Content-Security-Policy'] = "sandbox allow-same-origin; script-src 'none'; object-src 'none'";
     let start = 0, end = st.size - 1, code = 200;
     const range = req && req.headers.range;
     const m = range && /^bytes=(\d*)-(\d*)$/.exec(range);
@@ -2367,6 +2370,40 @@ function pocketFile(name) {
   return f;
 }
 
+// ---- 访问钥匙
+// 127.0.0.1 这台电脑上的所有账户都连得上（公用电脑、切换用户时，别人也能连）。
+// 所以每个请求都要带这把钥匙：桌面版窗口通过 cookie 带，浏览器插件配对后通过请求头带。
+// 钥匙存在当前 Windows 用户自己的文件夹里，别的账户读不到；临时模式存在临时文件夹里，关掉就删。
+const ACCESS_KEY_FILE = TEMP_MODE ? path.join(ROOT, '.访问钥匙') : path.join(os.homedir(), '.baibaoxia', 'access-key');
+const ACCESS_KEY = (() => {
+  try {
+    const k = fs.readFileSync(ACCESS_KEY_FILE, 'utf8').trim();
+    if (/^[a-f0-9]{64}$/.test(k)) return k;
+  } catch {}
+  const k = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(path.dirname(ACCESS_KEY_FILE), { recursive: true });
+    fs.writeFileSync(ACCESS_KEY_FILE, k, { mode: 0o600 });
+    if (IS_WIN && !TEMP_MODE) exec(`attrib +h "${path.dirname(ACCESS_KEY_FILE)}"`, { windowsHide: true }, () => {});
+  } catch {}
+  return k;
+})();
+const KEY_BUF = Buffer.from(ACCESS_KEY);
+function keyMatches(v) {
+  const b = Buffer.from(String(v || ''));
+  return b.length === KEY_BUF.length && crypto.timingSafeEqual(b, KEY_BUF);
+}
+function hasAccessKey(req) {
+  if (keyMatches(req.headers['x-baibao-key'])) return true;
+  const m = /(?:^|;\s*)bb_key=([a-f0-9]{64})/.exec(req.headers.cookie || '');
+  return !!m && keyMatches(m[1]);
+}
+// 证明"我是真的百宝匣"：对方给一个随机数，用钥匙算个签名回去。不泄露钥匙本身。
+function accessProof(nonce) {
+  return crypto.createHmac('sha256', ACCESS_KEY).update('baibao-proof:' + nonce).digest('hex');
+}
+const KEY_COOKIE = `bb_key=${ACCESS_KEY}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`;
+
 const server = http.createServer(async (req, res) => {
   try {
     // 只接受本机访问
@@ -2375,6 +2412,26 @@ const server = http.createServer(async (req, res) => {
 
     const url = new URL(req.url, `http://${HOST}`);
     const p = decodeURIComponent(url.pathname);
+
+    // 网页版：启动时用 ?k=钥匙 打开浏览器，这里换成 cookie，再跳回干净的地址
+    if (req.method === 'GET' && url.searchParams.has('k')) {
+      if (!keyMatches(url.searchParams.get('k'))) return send(res, 403, { error: 'forbidden' });
+      url.searchParams.delete('k');
+      res.writeHead(302, { 'Set-Cookie': KEY_COOKIE, Location: url.pathname + (url.search || ''), 'Cache-Control': 'no-store' });
+      return res.end();
+    }
+    // 不带钥匙也能访问的只有这两个：只回版本号，给插件和"是不是已经开着了"用
+    if (p === '/api/ping' || p === '/api/version') {
+      const nonce = url.searchParams.get('nonce');
+      const proof = nonce && /^[a-f0-9]{16,128}$/.test(nonce) ? accessProof(nonce) : undefined;
+      return send(res, 200, { ok: true, app: '百宝匣', version: VERSION, proof });
+    }
+    if (!hasAccessKey(req)) {
+      if (req.method === 'GET' && !p.startsWith('/api/')) {
+        return send(res, 401, '<!doctype html><meta charset="utf-8"><title>百宝匣</title><p style="font:16px sans-serif;margin:3em">请从桌面版窗口打开百宝匣，或者双击"启动百宝匣.bat"（它会自动用正确的方式打开这个页面）。</p>', 'text/html; charset=utf-8');
+      }
+      return send(res, 401, { ok: false, error: 'no-key', message: '没有访问钥匙。请从百宝匣窗口里操作。' });
+    }
 
     // 写操作必须带这个请求头，防止别的网站偷偷调用
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-baibao'] !== '1') {
@@ -2528,6 +2585,8 @@ const server = http.createServer(async (req, res) => {
       if (!tool || !canSee(req, tool)) return send(res, 404, { ok: false, message: '找不到这个工具，可能被改过或已上锁，刷新一下页面。' });
       const action = m[2];
       if (action === 'log') return send(res, 200, { log: logText(tool.id) });
+      // 会动东西的操作只认 POST：GET 不用带 X-Baibao 头，别的网站放一张图片就能触发
+      if (req.method !== 'POST') return send(res, 405, { ok: false, message: '请用 POST' });
       if (busy.has(tool.id) && action !== 'stop') return send(res, 200, { ok: false, message: `正在${busy.get(tool.id)}，请稍等。` });
       if (action === 'launch') {
         const r = await launch(tool, req);
@@ -3424,6 +3483,8 @@ const server = http.createServer(async (req, res) => {
         isWindows: IS_WIN,
         proxy: s['代理'] || '',
         ai: { baseUrl: (s['AI'] || {})['地址'] || '', model: (s['AI'] || {})['模型'] || '', hasKey: !!((s['AI'] || {})['密钥']), useProxy: !!s['AI用代理'], free: !!s['AI自由回答'] },
+        // 浏览器剪藏插件的配对码（就是访问钥匙）。没有 CORS 头，别的网站读不到这个回复。
+        clipKey: space === 'main' ? ACCESS_KEY : '',
       });
     }
     if (p === '/api/settings/proxy' && req.method === 'POST') {
@@ -3505,7 +3566,7 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/图标/') && req.method === 'GET') {
       const f = safeJoin(ICON_DIR, p.slice('/图标/'.length));
       if (!f) return send(res, 403, { error: 'forbidden' });
-      return sendFile(res, f, req);
+      return sendFile(res, f, req, true);
     }
     // Live2D 看板娘要用的 Cubism Core：Live2D 公司的专有运行库，不随百宝匣分发，第一次用时从官网下载一份
     if (p === '/live2d-core.js' && req.method === 'GET') {
@@ -3527,18 +3588,18 @@ const server = http.createServer(async (req, res) => {
       const f = safeJoin(MEMORY_DIR, p.slice('/记忆区/'.length));
       if (!f || f.includes(`${path.sep}.`)) return send(res, 403, { error: 'forbidden' });
       if (path.dirname(f) === FILES_DIR && !/^bytes=(?!0-)/.test(req.headers.range || '')) recordFileOpen(path.basename(f));
-      return sendFile(res, f, req);
+      return sendFile(res, f, req, true);
     }
     if (p.startsWith('/口袋/') && req.method === 'GET') {
       const f = pocketFile(p.slice('/口袋/'.length));
       if (!f) return send(res, 403, { error: 'forbidden' });
-      return sendFile(res, f, req);
+      return sendFile(res, f, req, true);
     }
     if (p.startsWith('/私密区/')) {
       if (!privateOk(req)) return send(res, 403, { error: '私密区已上锁' });
       const f = safeJoin(PRIVATE_DIR, p.slice('/私密区/'.length));
       if (!f || f.includes(`${path.sep}.`)) return send(res, 403, { error: 'forbidden' });
-      return sendFile(res, f, req);
+      return sendFile(res, f, req, true);
     }
     // Word / PPT 里的图片：/办公/main/文件名.docx/word/media/image1.png
     if ((m = /^\/办公\/(main|private)\/([^/]+)\/((?:word|ppt|xl)\/media\/[^/]+)$/.exec(p)) && req.method === 'GET') {
@@ -3602,11 +3663,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 // 问一下已经在运行的百宝匣是什么版本
-function askRunning(method, pathName, body) {
+function askRunning(method, pathName, body, withKey = false) {
   return new Promise(resolve => {
     const data = body ? JSON.stringify(body) : '';
-    const req = http.request({ host: HOST, port: PORT, path: pathName, method, timeout: 2000,
-      headers: { 'X-Baibao': '1', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, res => {
+    const headers = { 'X-Baibao': '1', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) };
+    // 只有对方先证明了自己是真的百宝匣（askGenuine 里 genuine 为 true），才把钥匙交给它
+    if (withKey) headers['X-Baibao-Key'] = ACCESS_KEY;
+    const req = http.request({ host: HOST, port: PORT, path: pathName, method, timeout: 2000, headers }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { resolve(null); } });
@@ -3617,24 +3680,35 @@ function askRunning(method, pathName, body) {
   });
 }
 
+// 占着端口的是不是自己的百宝匣：让它用钥匙签一个随机数。别人（比如另一个账户抢先占了端口）签不出来，
+// 这时不给它发钥匙、不打开它的页面
+async function askGenuine() {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const other = await askRunning('GET', '/api/version?nonce=' + nonce);
+  if (!other || !other.version) return null;
+  const want = Buffer.from(accessProof(nonce)), got = Buffer.from(String(other.proof || ''));
+  // genuine=false 可能是升级前的旧版百宝匣（不会签名），也可能是别人占了端口：可以请它退出，但不给钥匙
+  return { ...other, genuine: got.length === want.length && crypto.timingSafeEqual(got, want) };
+}
+
 let retried = false;
 server.on('error', async e => {
   if (e.code === 'EADDRINUSE') {
-    const other = await askRunning('GET', '/api/version');
+    const other = await askGenuine();
     if (DESKTOP) {
       // 桌面版：网页版百宝匣还开着，就让它退出（工具继续跑），由桌面版接手
       if (other && other.version && !retried) {
         retried = true;
-        await askRunning('POST', '/api/shutdown', { stopTools: false });
+        await askRunning('POST', '/api/shutdown', { stopTools: false }, other.genuine);
         setTimeout(() => server.listen(PORT, HOST), 1500);
         return;
       }
       DESKTOP.fatal(`端口 ${PORT} 被别的程序占用了，百宝匣开不起来。\n可以重启一下电脑再试。`);
       return;
     }
-    if (other && other.version === VERSION) {
+    if (other && other.genuine && other.version === VERSION) {
       console.log(`百宝匣已经开着了，直接帮你打开页面：http://${HOST}:${PORT}`);
-      openInSystem(`http://${HOST}:${PORT}`);
+      openInSystem(`http://${HOST}:${PORT}/?k=${ACCESS_KEY}`);
       setTimeout(() => process.exit(0), 500);
       return;
     }
@@ -3642,7 +3716,7 @@ server.on('error', async e => {
       // 后台是别的版本：让它退出（工具继续跑），换成这个
       retried = true;
       console.log(`发现旧版百宝匣（${other.version}）还在运行，正在换成新版 ${VERSION}…`);
-      await askRunning('POST', '/api/shutdown', { stopTools: false });
+      await askRunning('POST', '/api/shutdown', { stopTools: false }, other.genuine);
       setTimeout(() => server.listen(PORT, HOST), 1500);
       return;
     }
@@ -3671,7 +3745,7 @@ server.listen(PORT, HOST, () => {
   console.log('  这个窗口别关，关掉百宝匣就停了（由它开的工具也会一起关掉）。');
   console.log('');
   if (DESKTOP) DESKTOP.ready();
-  else if (!process.env.BAIBAO_NO_OPEN) openInSystem(`http://${HOST}:${PORT}`);
+  else if (!process.env.BAIBAO_NO_OPEN) openInSystem(`http://${HOST}:${PORT}/?k=${ACCESS_KEY}`);
 });
 
 // 万一哪里出了没想到的错，记下来，但百宝匣继续运行，不要整个崩掉
@@ -3702,4 +3776,4 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK']) {
 }
 
 // 桌面版要用到的几样东西
-module.exports = { VERSION, PORT, HOST, ROOT, TEMP_MODE, readSettings, writeSettings, shutdown };
+module.exports = { VERSION, PORT, HOST, ROOT, TEMP_MODE, ACCESS_KEY, readSettings, writeSettings, shutdown };

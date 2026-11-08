@@ -271,7 +271,22 @@ function createWindow() {
     },
   });
   if (desk()['最大化']) win.maximize();
-  win.loadURL(base + '/');
+  // 访问钥匙放进窗口的 cookie：窗口、子窗口里的所有请求都会自动带上，页面脚本读不到它。
+  // cookie 只按主机名区分、不分端口，所以发往 127.0.0.1 其他端口（别人的程序也可能在那里监听）的请求要把它去掉
+  const ses = win.webContents.session;
+  ses.webRequest.onBeforeSendHeaders((details, cb) => {
+    const h = details.requestHeaders;
+    const ck = Object.keys(h).find(k => k.toLowerCase() === 'cookie');
+    let sameApp = false;
+    try { sameApp = new URL(details.url).origin === base; } catch {}
+    if (ck && !sameApp && /(?:^|;\s*)bb_key=/.test(h[ck])) {
+      const rest = h[ck].split(/;\s*/).filter(c => !c.startsWith('bb_key=')).join('; ');
+      if (rest) h[ck] = rest; else delete h[ck];
+    }
+    cb({ requestHeaders: h });
+  });
+  // 带着钥匙打开一次，后台换成 cookie 并跳回干净的地址（和网页版同一条路）
+  win.loadURL(base + '/?k=' + serverApi.ACCESS_KEY);
   win.once('ready-to-show', () => { if (!START_HIDDEN) { win.show(); win.focus(); } });
 
   // 记住窗口大小和位置
@@ -374,7 +389,7 @@ function refreshTrayMenu() {
 function post(pathName, body) {
   return new Promise(resolve => {
     const data = JSON.stringify(body || {});
-    const req = http.request(base + pathName, { method: 'POST', headers: { 'X-Baibao': '1', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }, timeout: 120000 }, res => {
+    const req = http.request(base + pathName, { method: 'POST', headers: { 'X-Baibao': '1', 'X-Baibao-Key': serverApi.ACCESS_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }, timeout: 120000 }, res => {
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { resolve(null); } });

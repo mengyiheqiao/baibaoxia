@@ -6,9 +6,7 @@ function say(text, cls) { const m = $('#msg'); m.textContent = text; m.className
 chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
   tab = tabs[0];
   $('#title').textContent = tab ? tab.title : '';
-  chrome.runtime.sendMessage({ type: 'ping' }, r => {
-    if (!r || !r.ok) { say('连不上百宝匣，先把百宝匣打开。', 'err'); $('#page').disabled = true; }
-  });
+  ping();
 });
 
 async function go(selectionOnly) {
@@ -42,4 +40,21 @@ $('#site').addEventListener('change', e => {
     if (e.target.checked) set.add(host); else set.delete(host);
     chrome.storage.local.set({ blockedSites: [...set] });
   });
+});
+
+// 配对
+function ping() {
+  chrome.runtime.sendMessage({ type: 'ping' }, r => {
+    const st = $('#pair-state');
+    if (!r || !r.ok) { say('连不上百宝匣，先把百宝匣打开。', 'err'); $('#page').disabled = true; st.textContent = ''; return; }
+    $('#page').disabled = false;
+    if (!r.paired) { st.textContent = '还没配对：把百宝匣设置里的"浏览器剪藏插件配对码"粘贴到下面。'; st.className = 'tip err'; $('#page').disabled = true; }
+    else if (!r.genuine) { st.textContent = '配对码对不上（或连上的不是你自己的百宝匣），请重新粘贴。'; st.className = 'tip err'; $('#page').disabled = true; }
+    else { st.textContent = '已配对 ✓'; st.className = 'tip ok'; }
+  });
+}
+$('#pair-save').addEventListener('click', () => {
+  const k = $('#pair-key').value.trim().toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(k)) { $('#pair-state').textContent = '这不像配对码：应该是 64 个字母和数字。'; $('#pair-state').className = 'tip err'; return; }
+  chrome.storage.local.set({ pairKey: k }, () => { $('#pair-key').value = ''; ping(); });
 });

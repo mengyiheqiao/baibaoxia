@@ -15,6 +15,8 @@
   .how { font-size: 12.5px; background: #fff6dc; border: 1px solid #e2c87e; border-radius: 6px; padding: 8px 10px; margin: 10px 0 8px; }
   .sw { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 4px 0; cursor: pointer; }
   .sw input { accent-color: #2f4a43; }
+  .pair { border-top: 1px solid #cfd4cb; margin-top: 10px; padding-top: 6px; }
+  .pair input { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #cfd4cb; border-radius: 6px; font: 12px monospace; }
 </style>
 </head>
 <body>
@@ -26,6 +28,11 @@
   <label class="sw"><input type="checkbox" id="float"> 选中文字后显示小图标</label>
   <label class="sw"><input type="checkbox" id="site"> 在这个网站上不显示</label>
   <div class="tip">也可以在网页上点右键 →"存进百宝匣"。</div>
+  <div class="pair">
+    <div class="tip" id="pair-state"></div>
+    <input id="pair-key" placeholder="粘贴配对码（百宝匣 设置 → 浏览器剪藏插件配对码）" spellcheck="false">
+    <button id="pair-save">保存配对码</button>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

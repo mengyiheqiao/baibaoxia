@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "百宝匣剪藏",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "选中一段文字，点右下角冒出来的小图标就存进百宝匣；也能一键存整篇文章，图片会存到本地。",
   "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
   "host_permissions": ["http://127.0.0.1:3456/*"],

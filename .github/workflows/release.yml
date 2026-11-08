@@ -45,9 +45,25 @@ jobs:
         if: steps.ver.outputs.need == 'true'
         run: npm install --ignore-scripts --no-audit --no-fund
 
+      - name: 准备小更新包的签名私钥
+        if: steps.ver.outputs.need == 'true'
+        env:
+          KEY: ${{ secrets.UPDATE_SIGN_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            printf '%s\n' "$KEY" > "$RUNNER_TEMP/update-signing-key.pem"
+            echo "BAIBAO_UPDATE_SIGN_KEY=$RUNNER_TEMP/update-signing-key.pem" >> "$GITHUB_ENV"
+          else
+            echo "仓库 Secrets 里没有 UPDATE_SIGN_KEY，这次不做小更新包（只发完整版）"
+          fi
+
       - name: 打包
         if: steps.ver.outputs.need == 'true'
         run: node scripts/build.js all
+
+      - name: 删掉签名私钥
+        if: always()
+        run: rm -f "$RUNNER_TEMP/update-signing-key.pem"
 
       - name: 发布
         if: steps.ver.outputs.need == 'true'

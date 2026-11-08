@@ -13,10 +13,31 @@ async function extract(tabId, selectionOnly) {
   return res && res.result;
 }
 
+// 配对码：百宝匣 设置 → 浏览器剪藏插件配对码。同一台电脑上别的账户也可能占着 3456 端口，
+// 所以每次发送前先让对方用配对码签一个随机数，签对了才是你自己的百宝匣
+const getKey = () => new Promise(r => chrome.storage.local.get({ pairKey: '' }, v => r(v.pairKey || '')));
+
+async function hmacHex(key, text) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(text));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 返回 { ok: 连上了, version, genuine: 配对码对得上 }
+async function check(key) {
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
+  const j = await (await fetch(BAIBAO + '/api/ping?nonce=' + nonce)).json();
+  const genuine = !!key && typeof j.proof === 'string' && j.proof === await hmacHex(key, 'baibao-proof:' + nonce);
+  return { ok: true, version: j.version, genuine };
+}
+
 async function send(data) {
+  const key = await getKey();
+  if (!key) return { ok: false, message: '还没配对：点浏览器右上角的插件图标，粘贴百宝匣设置里的配对码。' };
+  if (!(await check(key)).genuine) return { ok: false, message: '配对码对不上，或者连上的不是你自己的百宝匣，没有发送。' };
   const r = await fetch(BAIBAO + '/api/clip', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Baibao': '1' },
+    headers: { 'Content-Type': 'application/json', 'X-Baibao': '1', 'X-Baibao-Key': key },
     body: JSON.stringify(data),
   });
   return r.json();
@@ -70,7 +91,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
   if (msg && msg.type === 'ping') {
-    fetch(BAIBAO + '/api/ping').then(r => r.json()).then(j => reply({ ok: true, version: j.version })).catch(() => reply({ ok: false }));
+    getKey().then(key => check(key).then(r => reply({ ...r, paired: !!key }))).catch(() => reply({ ok: false }));
     return true;
   }
   return false;

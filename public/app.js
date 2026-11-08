@@ -1007,6 +1007,12 @@
         </span>
       </section>
 
+      ${st.clipKey ? `<section class="setting">
+        <strong>浏览器剪藏插件配对码</strong>
+        <p class="sub">第一次用剪藏插件时，点浏览器右上角的插件图标，把这串配对码粘贴进去。有了它，插件只会把网页存进你自己的百宝匣；同一台电脑上的其他账户拿不到它。不要发给别人。</p>
+        <input id="clip-key" value="${esc(st.clipKey)}" readonly spellcheck="false" onfocus="this.select()" style="width:100%;font-family:monospace">
+      </section>` : ''}
+
       <section class="setting" id="ai-setting">
         <strong>AI</strong>
         <p class="sub">用来提炼资料速查卡、整理说明、回答问题。需要你在 AI 服务商那里注册拿一个密钥（按用量付费，一般很便宜）。</p>

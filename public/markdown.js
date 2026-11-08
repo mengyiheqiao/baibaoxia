@@ -22,12 +22,22 @@
       const ext = /^https?:/i.test(url) || plain.startsWith('/记忆区/资料/');
       return `<a href="${url}"${ext ? ' target="_blank" rel="noopener"' : ''}>${t}</a>`;
     });
-    // 裸网址自动变成链接（跳过已经在链接里的）
-    s = s.replace(/(^|[^"'=\w/>])(https?:\/\/[^\s<，。；！？、）】」]+)/g, (_, pre, u) => {
-      const tail = /[.,;:!?)]+$/.exec(u);
-      const url = tail ? u.slice(0, -tail[0].length) : u;
-      return `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>${tail ? tail[0] : ''}`;
-    });
+    // 裸网址自动变成链接：只处理标签外面的文字，跳过标签内部（属性值）和已有链接的文字，
+    // 否则图片 alt 里的网址会被改写、把属性的引号提前关掉
+    let inA = 0;
+    s = s.split(/(<[^>]*>)/).map((part, i) => {
+      if (i % 2) {
+        if (/^<a[\s>]/i.test(part)) inA++;
+        else if (/^<\/a>/i.test(part)) inA = Math.max(0, inA - 1);
+        return part;
+      }
+      if (inA) return part;
+      return part.replace(/(^|[^\w/])(https?:\/\/[^\s<，。；！？、）】」]+)/g, (_, pre, u) => {
+        const tail = /[.,;:!?)]+$/.exec(u);
+        const url = tail ? u.slice(0, -tail[0].length) : u;
+        return `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>${tail ? tail[0] : ''}`;
+      });
+    }).join('');
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     s = s.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
     s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
